@@ -8,8 +8,9 @@ from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import numpy as np
 import cv2
-import io,os
+import io
 import time
+import torch
 from PIL import Image
 from ultralytics import YOLO
 
@@ -19,7 +20,18 @@ IMG_SIZE    = 640           # Eğitimde kullandığın boyut
 MAX_DET     = 100           # Maksimum tespit sayısı
 DEVICE      = "cpu"         # t3.small'da GPU yok
 
-os.environ['TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD'] = '0'
+# Save the original torch.load function
+_original_torch_load = torch.load
+
+# Define a new function that forces weights_only=False
+def custom_torch_load(*args, **kwargs):
+    if "weights_only" not in kwargs:
+        kwargs["weights_only"] = False
+    return _original_torch_load(*args, **kwargs)
+
+# Override torch.load globally
+torch.load = custom_torch_load
+
 app = FastAPI(title="StokSay API", version="1.0.0")
 
 app.add_middleware(
