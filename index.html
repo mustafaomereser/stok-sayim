@@ -661,7 +661,7 @@
                     <div class="setting-group">
                         <div class="setting-label">Güven Eşiği</div>
                         <div class="conf-row">
-                            <input type="range" id="conf-slider" min="10" max="90" value="40" step="5">
+                            <input type="range" id="conf-slider" min="10" max="90" value="20" step="5">
                             <span id="conf-val">40%</span>
                         </div>
                     </div>
@@ -695,8 +695,8 @@
         function loadCfg() { try { return JSON.parse(localStorage.getItem('stoksay_cfg') || '{}'); } catch { return {}; } }
         function saveCfg(c) { localStorage.setItem('stoksay_cfg', JSON.stringify(c)); }
         let cfg = loadCfg();
-        if (!cfg.apiUrl) cfg.apiUrl = 'http://localhost:8000';
-        if (!cfg.conf) cfg.conf = 40;
+        if (!cfg.apiUrl) cfg.apiUrl = 'http://13.63.154.83';
+        if (!cfg.conf) cfg.conf = 20;
 
         // ── REFS ─────────────────────────────────────────────────────────
         const canvasWrap = document.getElementById('canvas-wrap');
