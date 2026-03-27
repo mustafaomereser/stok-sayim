@@ -26,7 +26,7 @@ echo "── [4/6] Python venv ve paketler kuruluyor..."
 python3 -m venv venv
 source venv/bin/activate
 pip install --upgrade pip -q
-pip install -r /tmp/requirements.txt -q
+pip install -r requirements.txt -q
 
 echo "── [5/6] Systemd servis oluşturuluyor..."
 cat > /etc/systemd/system/stoksay.service << 'EOF'
