@@ -19,6 +19,7 @@ IMG_SIZE    = 640           # Eğitimde kullandığın boyut
 MAX_DET     = 100           # Maksimum tespit sayısı
 DEVICE      = "cpu"         # t3.small'da GPU yok
 
+os.environ['TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD'] = '0'
 app = FastAPI(title="StokSay API", version="1.0.0")
 
 app.add_middleware(
