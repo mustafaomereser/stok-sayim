@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import numpy as np
 import cv2
-import io
+import io,os
 import time
 from PIL import Image
 from ultralytics import YOLO
