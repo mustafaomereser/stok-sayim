@@ -14,7 +14,7 @@ from PIL import Image
 from ultralytics import YOLO
 
 # ── CONFIG ────────────────────────────────────────────────────────
-MODEL_PATH  = "yolov8n.pt"  #"best.pt"     # Colab'dan indirdiğin dosya
+MODEL_PATH  = "yolov8n.pt"  # "best.pt"     # Colab'dan indirdiğin dosya
 IMG_SIZE    = 640           # Eğitimde kullandığın boyut
 MAX_DET     = 100           # Maksimum tespit sayısı
 DEVICE      = "cpu"         # t3.small'da GPU yok
