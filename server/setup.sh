@@ -4,7 +4,7 @@
 set -e
 
 REPO="https://github.com/mustafaomereser/stok-sayim"
-APP_DIR="/opt/stoksay"
+APP_DIR="/home/ubuntu/stok-sayim"
 
 echo "── [1/4] Sistem güncelleniyor..."
 apt-get update -qq
