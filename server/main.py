@@ -1,6 +1,6 @@
 """
 StokSay Backend — YOLOv8s + FastAPI
-t3.small (2GB RAM, 2 vCPU) için CPU optimized stable count pipeline
+t3.small (CPU) için conf/IoU toleranslı stable count pipeline
 """
 
 from fastapi import FastAPI, File, UploadFile, Form
@@ -13,16 +13,19 @@ import torch
 from ultralytics import YOLO
 
 # ── CONFIG ────────────────────────────────────────────────────────
-MODEL_PATH  = "yolov8s.pt"  # small model → CPU için daha stabil
-IMG_SIZE    = 640
-MAX_DET     = 100
-DEVICE      = "cpu"
+MODEL_PATH = "yolov8s.pt"
+IMG_SIZE = 640
+MAX_DET = 200         # CPU için biraz artırdım
+DEVICE = "cpu"
+CONF_MIN = 0.1         # düşük confidence ile küçük objeleri al
+IOU_NMS = 0.3         # overlap toleransı, düşük → daha fazla box kalır
+TILE_OVERLAP = 50         # tile overlap
 
 # ── DETERMINISTIC SETUP ──────────────────────────────────────────
 torch.manual_seed(42)
 torch.set_num_threads(1)
 
-app = FastAPI(title="StokSay API", version="1.0.0")
+app = FastAPI(title="StokSay API", version="2.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -42,6 +45,8 @@ model.predict(dummy, imgsz=IMG_SIZE, verbose=False)
 print("Model hazır!")
 
 # ── HEALTH ───────────────────────────────────────────────────────
+
+
 @app.get("/health")
 def health():
     return {
@@ -51,16 +56,15 @@ def health():
         "device": DEVICE,
     }
 
-# ── TILE + STABLE COUNT ──────────────────────────────────────────
-def tile_image(img, tile_size=640, overlap=50):
-    """Görseli tile’lara böl, overlap ile kaçırmayı azalt"""
+# ── TILE FUNCTION ────────────────────────────────────────────────
+
+
+def tile_image(img, tile_size=IMG_SIZE, overlap=TILE_OVERLAP):
     h, w = img.shape[:2]
     tiles = []
     positions = []
-
     y_steps = list(range(0, h, tile_size - overlap))
     x_steps = list(range(0, w, tile_size - overlap))
-
     for y in y_steps:
         for x in x_steps:
             y1, x1 = y, x
@@ -70,11 +74,14 @@ def tile_image(img, tile_size=640, overlap=50):
             positions.append((x1, y1))
     return tiles, positions
 
+# ── DETECT ───────────────────────────────────────────────────────
+
+
 @app.post("/detect")
 async def detect(
     image: UploadFile = File(...),
-    confidence: float = Form(default=0.2),
-    classes: str = Form(default="person,bottle"),  # seçilecek classlar
+    confidence: float = Form(default=CONF_MIN),
+    classes: str = Form(default="person,bottle"),
 ):
     t0 = time.time()
 
@@ -86,9 +93,9 @@ async def detect(
         return {"detections": [], "elapsed_ms": 0, "count": 0, "error": "Görsel okunamadı"}
 
     # Tile’lara böl
-    tiles, positions = tile_image(frame, tile_size=IMG_SIZE, overlap=50)
+    tiles, positions = tile_image(frame)
 
-    # Class filtreleme
+    # Class filter
     target_labels = [c.strip() for c in classes.split(",")]
     target_ids = [i for i, n in model.names.items() if n in target_labels]
 
@@ -100,9 +107,9 @@ async def detect(
         results = model.predict(
             tile,
             imgsz=IMG_SIZE,
-            conf=max(0.1, min(0.95, confidence)),
+            conf=max(CONF_MIN, min(0.95, confidence)),
             max_det=MAX_DET,
-            iou=0.45,
+            iou=IOU_NMS,
             device=DEVICE,
             classes=target_ids,
             verbose=False,
@@ -113,7 +120,7 @@ async def detect(
                 continue
             for box in boxes:
                 cls_id = int(box.cls[0])
-                label  = model.names[cls_id]
+                label = model.names[cls_id]
                 conf_score = float(box.conf[0])
                 x1, y1, x2, y2 = box.xyxy[0].tolist()
                 # Global koordinata çevir
