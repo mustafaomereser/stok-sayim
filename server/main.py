@@ -15,22 +15,30 @@ from PIL import Image
 from ultralytics import YOLO
 
 # ── CONFIG ────────────────────────────────────────────────────────
-MODEL_PATH  = "yolov8m.pt"  # "best.pt"     # Colab'dan indirdiğin dosya
-IMG_SIZE    = 640           # Eğitimde kullandığın boyut
-MAX_DET     = 100           # Maksimum tespit sayısı
-DEVICE      = "cpu"         # t3.small'da GPU yok
+MODEL_PATH = "yolov8m.pt"  # "best.pt"     # Colab'dan indirdiğin dosya
+IMG_SIZE = 640           # Eğitimde kullandığın boyut
+MAX_DET = 100           # Maksimum tespit sayısı
+DEVICE = "cpu"         # t3.small'da GPU yok
 
 # Save the original torch.load function
 _original_torch_load = torch.load
 
 # Define a new function that forces weights_only=False
+
+
 def custom_torch_load(*args, **kwargs):
     if "weights_only" not in kwargs:
         kwargs["weights_only"] = False
     return _original_torch_load(*args, **kwargs)
 
+
 # Override torch.load globally
 torch.load = custom_torch_load
+
+# ── DETERMINSITIC SETUP ───────────────────────────────────────────
+torch.manual_seed(42)
+torch.set_num_threads(1)  # CPU’da tek thread → daha stabil count
+
 
 app = FastAPI(title="StokSay API", version="1.0.0")
 
@@ -51,6 +59,8 @@ model.predict(dummy, imgsz=IMG_SIZE, verbose=False)
 print("Model hazır!")
 
 # ── HEALTH ───────────────────────────────────────────────────────
+
+
 @app.get("/health")
 def health():
     return {
@@ -61,10 +71,12 @@ def health():
     }
 
 # ── DETECT ───────────────────────────────────────────────────────
+
+
 @app.post("/detect")
 async def detect(
     image: UploadFile = File(...),
-    confidence: float = Form(default=0.4),
+    confidence: float = Form(default=0.2),
 ):
     """
     Fotoğrafı alır, YOLOv8n ile analiz eder, tespitleri döner.
@@ -100,6 +112,7 @@ async def detect(
         imgsz=IMG_SIZE,
         conf=max(0.1, min(0.95, confidence)),
         max_det=MAX_DET,
+        iou=0.45,   # NMS stabilizasyonu
         device=DEVICE,
         verbose=False,
     )
@@ -114,8 +127,8 @@ async def detect(
             continue
         for box in boxes:
             cls_id = int(box.cls[0])
-            label  = model.names[cls_id]
-            conf   = float(box.conf[0])
+            label = model.names[cls_id]
+            conf = float(box.conf[0])
             # xyxy → x, y, w, h (pixel)
             x1, y1, x2, y2 = box.xyxy[0].tolist()
             detections.append({
