@@ -1,6 +1,6 @@
 """
 StokSay Backend — YOLOv8m + FastAPI
-t3.small CPU için stable, duplicate-free, tile+IoU merge pipeline
+t3.small CPU için mümkün olan en doğru sayım pipeline
 """
 
 from fastapi import FastAPI, File, UploadFile, Form
@@ -12,27 +12,27 @@ import time
 import torch
 from ultralytics import YOLO
 
-# ── CONFIG ────────────────────────────────────────────────────────
-MODEL_PATH = "yolov8m.pt"  # medium model → daha doğru tespit
+# ── CONFIG ─────────────────────────────────────────────
+MODEL_PATH = "yolov8m.pt"
 IMG_SIZE = 640
 MAX_DET = 200
 DEVICE = "cpu"
 CONF_MIN = 0.2
-IOU_NMS = 0.3       # NMS threshold
-TILE_OVERLAP = 100      # overlap px
+IOU_NMS = 0.3
+TILE_OVERLAP = 100
 
 torch.manual_seed(42)
 torch.set_num_threads(1)
 
-app = FastAPI(title="StokSay API", version="3.0.0")
+app = FastAPI(title="StokSay API", version="CPU-Stable-1")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_methods=["POST", "GET"],
-    allow_headers=["*"],
+    allow_headers=["*"]
 )
 
-# ── MODEL LOAD ───────────────────────────────────────────────────
+# ── MODEL LOAD ────────────────────────────────────────
 print(f"Model yükleniyor: {MODEL_PATH}")
 model = YOLO(MODEL_PATH)
 model.to(DEVICE)
@@ -40,7 +40,7 @@ dummy = np.zeros((IMG_SIZE, IMG_SIZE, 3), dtype=np.uint8)
 model.predict(dummy, imgsz=IMG_SIZE, verbose=False)
 print("Model hazır!")
 
-# ── HEALTH ───────────────────────────────────────────────────────
+# ── HEALTH ───────────────────────────────────────────
 
 
 @app.get("/health")
@@ -49,10 +49,10 @@ def health():
         "status": "ok",
         "model": MODEL_PATH,
         "classes": model.names,
-        "device": DEVICE,
+        "device": DEVICE
     }
 
-# ── TILE FUNCTION ────────────────────────────────────────────────
+# ── TILE FUNCTION ─────────────────────────────────────
 
 
 def tile_image(img, tile_size=IMG_SIZE, overlap=TILE_OVERLAP):
@@ -63,12 +63,12 @@ def tile_image(img, tile_size=IMG_SIZE, overlap=TILE_OVERLAP):
     for y in y_steps:
         for x in x_steps:
             y1, x1 = y, x
-            y2, x2 = min(y + tile_size, h), min(x + tile_size, w)
+            y2, x2 = min(y+tile_size, h), min(x+tile_size, w)
             tiles.append(img[y1:y2, x1:x2])
             positions.append((x1, y1))
     return tiles, positions
 
-# ── IOU MERGE ───────────────────────────────────────────────────
+# ── IOU MERGE ─────────────────────────────────────────
 
 
 def iou(box1, box2):
@@ -78,18 +78,17 @@ def iou(box1, box2):
     yi1 = max(y1, y1b)
     xi2 = min(x2, x2b)
     yi2 = min(y2, y2b)
-    inter = max(0, xi2 - xi1) * max(0, yi2 - yi1)
-    union = (x2 - x1)*(y2 - y1) + (x2b - x1b)*(y2b - y1b) - inter
-    return inter / (union + 1e-6)
+    inter = max(0, xi2-xi1)*max(0, yi2-yi1)
+    union = (x2-x1)*(y2-y1) + (x2b-x1b)*(y2b-y1b) - inter
+    return inter/(union+1e-6)
 
 
-def merge_boxes(boxes, iou_thresh=0.3):
+def merge_boxes(boxes, iou_thresh=IOU_NMS):
     merged = []
     for box in boxes:
         add = True
         for i, m in enumerate(merged):
             if iou(box, m) > iou_thresh:
-                # merge
                 mx1 = min(box[0], m[0])
                 my1 = min(box[1], m[1])
                 mx2 = max(box[2], m[2])
@@ -101,17 +100,16 @@ def merge_boxes(boxes, iou_thresh=0.3):
             merged.append(box)
     return merged
 
-# ── DETECT ───────────────────────────────────────────────────────
+# ── DETECT ────────────────────────────────────────────
 
 
 @app.post("/detect")
 async def detect(
     image: UploadFile = File(...),
     confidence: float = Form(default=CONF_MIN),
-    classes: str = Form(default="person,bottle"),
+    classes: str = Form(default="person,bottle")
 ):
     t0 = time.time()
-
     raw = await image.read()
     img_array = np.frombuffer(raw, dtype=np.uint8)
     frame = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
@@ -125,7 +123,7 @@ async def detect(
     all_boxes = []
     all_detections = []
 
-    for tile, (x_offset, y_offset) in zip(tiles, positions):
+    for tile, (x_off, y_off) in zip(tiles, positions):
         results = model.predict(
             tile,
             imgsz=IMG_SIZE,
@@ -134,7 +132,7 @@ async def detect(
             iou=IOU_NMS,
             device=DEVICE,
             classes=target_ids,
-            verbose=False,
+            verbose=False
         )
         for r in results:
             boxes = r.boxes
@@ -145,33 +143,26 @@ async def detect(
                 label = model.names[cls_id]
                 conf_score = float(box.conf[0])
                 x1, y1, x2, y2 = box.xyxy[0].tolist()
-                # global koordinata çevir
-                x1 += x_offset
-                x2 += x_offset
-                y1 += y_offset
-                y2 += y_offset
+                x1 += x_off
+                x2 += x_off
+                y1 += y_off
+                y2 += y_off
                 all_boxes.append([x1, y1, x2, y2])
                 all_detections.append({
                     "label": label,
                     "confidence": round(conf_score, 3),
-                    "bbox": [round(x1), round(y1), round(x2 - x1), round(y2 - y1)]
+                    "bbox": [round(x1), round(y1), round(x2-x1), round(y2-y1)]
                 })
 
-    # Duplicate-free merge
-    merged_boxes = merge_boxes(all_boxes, iou_thresh=IOU_NMS)
-    elapsed = int((time.time() - t0)*1000)
+    merged_boxes = merge_boxes(all_boxes)
+    elapsed = int((time.time()-t0)*1000)
 
     return {
         "detections": all_detections,
         "elapsed_ms": elapsed,
-        "count": len(merged_boxes),
+        "count": len(merged_boxes)
     }
 
 if __name__ == "__main__":
-    uvicorn.run(
-        "main:app",
-        host="0.0.0.0",
-        port=8000,
-        workers=1,
-        timeout_keep_alive=30
-    )
+    uvicorn.run("main:app", host="0.0.0.0", port=8000,
+                workers=1, timeout_keep_alive=30)
