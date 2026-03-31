@@ -113,6 +113,7 @@ async def detect(
         conf=max(0.1, min(0.95, confidence)),
         max_det=MAX_DET,
         iou=0.45,   # NMS stabilizasyonu
+        classes=[0, 39],  # only person and bottle for yolov8m
         device=DEVICE,
         verbose=False,
     )
