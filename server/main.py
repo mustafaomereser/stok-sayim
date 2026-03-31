@@ -1,6 +1,6 @@
 """
 StokSay Backend — YOLOv8m + FastAPI
-t3.small CPU için mümkün olan en doğru sayım pipeline
+GPU-ready, duplicate-free, stable count
 """
 
 from fastapi import FastAPI, File, UploadFile, Form
@@ -13,18 +13,17 @@ import torch
 from ultralytics import YOLO
 
 # ── CONFIG ─────────────────────────────────────────────
-MODEL_PATH = "yolov8m.pt"
+MODEL_PATH = "yolov8m.pt"   # medium model, GPU ile hızlı ve doğru
 IMG_SIZE = 640
-MAX_DET = 200
-DEVICE = "cpu"
+MAX_DET = 300
+DEVICE = "cuda"          # RTX 4050 GPU
 CONF_MIN = 0.2
 IOU_NMS = 0.3
 TILE_OVERLAP = 100
 
 torch.manual_seed(42)
-torch.set_num_threads(1)
 
-app = FastAPI(title="StokSay API", version="CPU-Stable-1")
+app = FastAPI(title="StokSay API GPU", version="GPU-Stable-1")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -33,7 +32,7 @@ app.add_middleware(
 )
 
 # ── MODEL LOAD ────────────────────────────────────────
-print(f"Model yükleniyor: {MODEL_PATH}")
+print(f"Model yükleniyor: {MODEL_PATH} (GPU)")
 model = YOLO(MODEL_PATH)
 model.to(DEVICE)
 dummy = np.zeros((IMG_SIZE, IMG_SIZE, 3), dtype=np.uint8)
@@ -45,12 +44,7 @@ print("Model hazır!")
 
 @app.get("/health")
 def health():
-    return {
-        "status": "ok",
-        "model": MODEL_PATH,
-        "classes": model.names,
-        "device": DEVICE
-    }
+    return {"status": "ok", "model": MODEL_PATH, "classes": model.names, "device": DEVICE}
 
 # ── TILE FUNCTION ─────────────────────────────────────
 
@@ -58,8 +52,8 @@ def health():
 def tile_image(img, tile_size=IMG_SIZE, overlap=TILE_OVERLAP):
     h, w = img.shape[:2]
     tiles, positions = [], []
-    y_steps = list(range(0, h, tile_size - overlap))
-    x_steps = list(range(0, w, tile_size - overlap))
+    y_steps = list(range(0, h, tile_size-overlap))
+    x_steps = list(range(0, w, tile_size-overlap))
     for y in y_steps:
         for x in x_steps:
             y1, x1 = y, x
@@ -157,11 +151,7 @@ async def detect(
     merged_boxes = merge_boxes(all_boxes)
     elapsed = int((time.time()-t0)*1000)
 
-    return {
-        "detections": all_detections,
-        "elapsed_ms": elapsed,
-        "count": len(merged_boxes)
-    }
+    return {"detections": all_detections, "elapsed_ms": elapsed, "count": len(merged_boxes)}
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000,
