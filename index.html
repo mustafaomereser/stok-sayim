@@ -695,7 +695,7 @@
         function loadCfg() { try { return JSON.parse(localStorage.getItem('stoksay_cfg') || '{}'); } catch { return {}; } }
         function saveCfg(c) { localStorage.setItem('stoksay_cfg', JSON.stringify(c)); }
         let cfg = loadCfg();
-        if (!cfg.apiUrl) cfg.apiUrl = 'http://13.63.154.83';
+        if (!cfg.apiUrl) cfg.apiUrl = 'https://stoksay.aracservistakip.com';
         if (!cfg.conf) cfg.conf = 30;
 
         // ── REFS ─────────────────────────────────────────────────────────
