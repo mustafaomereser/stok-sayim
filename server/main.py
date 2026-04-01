@@ -6,7 +6,7 @@ import cv2
 import time
 from PIL import Image
 import torch
-import clip  # pip install ftfy regex tqdm git+https://github.com/openai/CLIP.git
+import clip
 import os
 
 # ── CONFIG ───────────────────────────────────────────────────────
