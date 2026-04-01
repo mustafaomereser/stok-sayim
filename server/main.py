@@ -36,7 +36,7 @@ DEVICE = "cpu"
 
 # ── MODEL YÜKLEMESİ ──────────────────────────────────────────────
 print("YOLO yükleniyor...")
-yolo = YOLO("yolov8n.pt")
+yolo = YOLO("models/yolov8n.pt")
 
 print("CLIP yükleniyor...")
 clip_model, clip_preprocess = clip.load("ViT-B/32", device=DEVICE)

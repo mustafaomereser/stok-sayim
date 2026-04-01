@@ -93,17 +93,12 @@ server {
         try_files \$uri \$uri/ =404;
     }
 
-    # API
-    location /detect {
-        proxy_pass         http://127.0.0.1:8000/detect;
+    # API — tüm endpoint'leri proxy'le
+    location ~ ^/(detect|health|references) {
+        proxy_pass         http://127.0.0.1:8000;
         proxy_set_header   Host \$host;
         proxy_set_header   X-Real-IP \$remote_addr;
         proxy_read_timeout 60s;
-    }
-
-    location /health {
-        proxy_pass         http://127.0.0.1:8000/health;
-        proxy_set_header   Host \$host;
     }
 }
 EOF
