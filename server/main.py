@@ -4,6 +4,7 @@ Eğitim yok, referans fotoğraflardan öğrenir.
 t3.small (2GB RAM, 2 vCPU) için optimize edilmiştir.
 """
 
+from ultralytics import YOLO
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
@@ -17,12 +18,15 @@ import io
 
 # PyTorch 2.6 fix
 _orig_load = torch.load
+
+
 def _patched_load(*args, **kwargs):
     kwargs.setdefault("weights_only", False)
     return _orig_load(*args, **kwargs)
+
+
 torch.load = _patched_load
 
-from ultralytics import YOLO
 
 app = FastAPI(title="StokSay API", version="2.0.0")
 app.add_middleware(
@@ -47,8 +51,10 @@ print("Modeller hazır!")
 # { "somun": [emb1, emb2, ...], "röle": [...] }
 reference_store: dict[str, list[torch.Tensor]] = {}
 
+
 def normalize(t: torch.Tensor) -> torch.Tensor:
     return t / t.norm(dim=-1, keepdim=True)
+
 
 def get_clip_embedding(img: Image.Image) -> torch.Tensor:
     tensor = clip_preprocess(img).unsqueeze(0).to(DEVICE)
@@ -56,12 +62,15 @@ def get_clip_embedding(img: Image.Image) -> torch.Tensor:
         emb = clip_model.encode_image(tensor)
     return normalize(emb)
 
+
 def get_mean_embedding(label: str) -> torch.Tensor:
     embs = reference_store[label]
     stacked = torch.cat(embs, dim=0)
     return normalize(stacked.mean(dim=0, keepdim=True))
 
 # ── HEALTH ───────────────────────────────────────────────────────
+
+
 @app.get("/health")
 def health():
     return {
@@ -71,19 +80,16 @@ def health():
     }
 
 # ── REFERANS YÜKLEMESİ ───────────────────────────────────────────
+
+
 @app.post("/references")
 async def upload_references(
     files: list[UploadFile] = File(...),
     label: str = Form(...),
 ):
-    """
-    Bir ürün için referans fotoğrafları yükle.
-    label: ürün adı (ör: "somun")
-    files: o ürünün 3-10 fotoğrafı
-    Birden fazla ürün için birden fazla kez çağır.
-    """
     embeddings = []
     for f in files:
+        await f.seek(0)          # ← bunu ekle
         raw = await f.read()
         img = Image.open(io.BytesIO(raw)).convert("RGB")
         emb = get_clip_embedding(img)
@@ -97,9 +103,11 @@ async def upload_references(
         "all_labels": list(reference_store.keys()),
     }
 
+
 @app.get("/references")
 def list_references():
     return {"references": {k: len(v) for k, v in reference_store.items()}}
+
 
 @app.delete("/references/{label}")
 def delete_reference(label: str):
@@ -109,6 +117,8 @@ def delete_reference(label: str):
     return {"status": "ok", "remaining": list(reference_store.keys())}
 
 # ── DETECT ───────────────────────────────────────────────────────
+
+
 @app.post("/detect")
 async def detect(
     image: UploadFile = File(...),
@@ -131,7 +141,8 @@ async def detect(
     }
     """
     if not reference_store:
-        raise HTTPException(400, "Önce /references ile referans fotoğraf yükle")
+        raise HTTPException(
+            400, "Önce /references ile referans fotoğraf yükle")
 
     t0 = time.time()
 
@@ -153,7 +164,8 @@ async def detect(
     label_embeddings = {l: get_mean_embedding(l) for l in reference_store}
 
     # YOLO detection
-    yolo_results = yolo.predict(frame, imgsz=640, conf=confidence, max_det=200, device=DEVICE, verbose=False)
+    yolo_results = yolo.predict(
+        frame, imgsz=640, conf=confidence, max_det=200, device=DEVICE, verbose=False)
 
     detections = []
     for r in yolo_results:
@@ -190,4 +202,5 @@ async def detect(
 
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, workers=1, timeout_keep_alive=30)
+    uvicorn.run("main:app", host="0.0.0.0", port=8000,
+                workers=1, timeout_keep_alive=30)
