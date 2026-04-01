@@ -1,32 +1,17 @@
 """
-StokSay Backend — YOLO + CLIP + DBSCAN
-Eğitim yok, referans yok, label yok.
-Benzer objeleri otomatik gruplandırır ve sayar.
+StokSay Backend — Saf OpenCV ile obje sayma
+AI yok, model yok, eğitim yok.
+Kontur tespiti ile objeleri bulur ve sayar.
 """
 
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
-import torch
-import clip
-from PIL import Image
 import numpy as np
 import cv2
 import time
-import io
-from sklearn.cluster import DBSCAN
-from sklearn.preprocessing import normalize as sk_normalize
 
-# PyTorch 2.6 fix
-_orig_load = torch.load
-def _patched_load(*args, **kwargs):
-    kwargs.setdefault("weights_only", False)
-    return _orig_load(*args, **kwargs)
-torch.load = _patched_load
-
-from ultralytics import YOLO
-
-app = FastAPI(title="StokSay API", version="3.0.0")
+app = FastAPI(title="StokSay API", version="4.0.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -34,43 +19,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-DEVICE = "cpu"
-
-print("YOLO yükleniyor...")
-yolo = YOLO("yolov8n.pt")
-
-print("CLIP yükleniyor...")
-clip_model, clip_preprocess = clip.load("ViT-B/32", device=DEVICE)
-clip_model.eval()
-print("Modeller hazır!")
-
-
-def get_clip_embedding(img: Image.Image) -> np.ndarray:
-    tensor = clip_preprocess(img).unsqueeze(0).to(DEVICE)
-    with torch.no_grad():
-        emb = clip_model.encode_image(tensor)
-    emb = emb.cpu().numpy().astype(np.float32)
-    return sk_normalize(emb)[0]  # (512,)
-
-
 @app.get("/health")
 def health():
-    return {"status": "ok", "device": DEVICE}
+    return {"status": "ok", "mode": "opencv-contour"}
 
 
 @app.post("/detect")
 async def detect(
     image: UploadFile = File(...),
-    confidence: float = Form(default=0.2),   # YOLO eşiği — düşük tut, çok obje yakalasın
-    eps: float = Form(default=0.3),           # DBSCAN: ne kadar benzer olunca aynı grup (0-1, küçük = daha katı)
-    min_samples: int = Form(default=1),       # DBSCAN: grup için min obje sayısı
+    # Minimum obje alanı (piksel²) — küçük gürültüleri eler
+    min_area: int = Form(default=200),
+    # Maksimum obje alanı — çok büyük alanları eler (arka plan vs)
+    max_area: int = Form(default=50000),
+    # Blur miktarı — gürültüyü azaltır (tek sayı, çift olursa +1)
+    blur: int = Form(default=5),
+    # Threshold tipi: "otsu", "adaptive"
+    threshold_type: str = Form(default="otsu"),
 ):
-    """
-    1. YOLO → tüm objeleri bul
-    2. Her bbox'ı CLIP ile embedding'e çevir
-    3. DBSCAN ile benzer embedding'leri grupla
-    4. Her grup = ayrı obje türü → say
-    """
     t0 = time.time()
 
     raw = await image.read()
@@ -79,77 +44,68 @@ async def detect(
     if frame is None:
         raise HTTPException(400, "Görsel okunamadı")
 
-    # Büyük görseli küçült
     h, w = frame.shape[:2]
-    if max(h, w) > 1280:
-        scale = 1280 / max(h, w)
-        frame = cv2.resize(frame, (int(w * scale), int(h * scale)))
 
-    pil_full = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+    # ── Ön işleme ────────────────────────────────────────────────
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-    # ── ADIM 1: YOLO detection ───────────────────────────────────
-    yolo_results = yolo.predict(
-        frame,
-        imgsz=640,
-        conf=confidence,
-        max_det=300,
-        device=DEVICE,
-        verbose=False,
-    )
+    # Blur — çift olursa +1 yap (OpenCV gereksinimi)
+    b = blur if blur % 2 == 1 else blur + 1
+    blurred = cv2.GaussianBlur(gray, (b, b), 0)
 
-    boxes = []
-    for r in yolo_results:
-        if r.boxes is None:
-            continue
-        for box in r.boxes:
-            x1, y1, x2, y2 = [int(v) for v in box.xyxy[0].tolist()]
-            bw, bh = x2 - x1, y2 - y1
-            if bw < 8 or bh < 8:
-                continue
-            boxes.append({
-                "bbox": [x1, y1, bw, bh],
-                "confidence": round(float(box.conf[0]), 3),
-            })
+    # Threshold
+    if threshold_type == "adaptive":
+        thresh = cv2.adaptiveThreshold(
+            blurred, 255,
+            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            cv2.THRESH_BINARY_INV,
+            11, 2
+        )
+    else:  # otsu
+        _, thresh = cv2.threshold(
+            blurred, 0, 255,
+            cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU
+        )
 
-    if not boxes:
-        return {"detections": [], "elapsed_ms": int((time.time()-t0)*1000), "count": 0}
+    # Morfoloji — küçük delikleri kapat, gürültüyü temizle
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel, iterations=2)
+    thresh = cv2.morphologyEx(thresh, cv2.MORPH_OPEN,  kernel, iterations=1)
 
-    # ── ADIM 2: CLIP embedding ───────────────────────────────────
-    embeddings = []
-    for b in boxes:
-        x1, y1, bw, bh = b["bbox"]
-        crop = pil_full.crop((x1, y1, x1+bw, y1+bh))
-        emb = get_clip_embedding(crop)
-        embeddings.append(emb)
+    # ── Kontur tespiti ────────────────────────────────────────────
+    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-    embeddings_np = np.array(embeddings)  # (N, 512)
-
-    # ── ADIM 3: DBSCAN clustering ────────────────────────────────
-    # metric=cosine: embedding benzerliği cosine distance ile ölçülür
-    db = DBSCAN(eps=eps, min_samples=min_samples, metric="cosine", n_jobs=-1)
-    labels = db.fit_predict(embeddings_np)
-    # -1 = gürültü (hiçbir gruba uymayan)
-
-    # ── ADIM 4: Sonuçları formatla ───────────────────────────────
     detections = []
-    for i, (box, label) in enumerate(zip(boxes, labels)):
+    for cnt in contours:
+        area = cv2.contourArea(cnt)
+        if area < min_area or area > max_area:
+            continue
+
+        x, y, bw, bh = cv2.boundingRect(cnt)
+
+        # Çok uzun/ince şekilleri ele — muhtemelen çizgi/gürültü
+        aspect = bw / bh if bh > 0 else 0
+        if aspect > 8 or aspect < 0.125:
+            continue
+
+        # Konturun merkezi
+        M = cv2.moments(cnt)
+        cx = int(M["m10"] / M["m00"]) if M["m00"] != 0 else x + bw // 2
+        cy = int(M["m01"] / M["m00"]) if M["m00"] != 0 else y + bh // 2
+
         detections.append({
-            "group":      int(label),       # -1 = bilinmiyor
-            "confidence": box["confidence"],
-            "bbox":       box["bbox"],
+            "bbox":   [x, y, bw, bh],
+            "center": [cx, cy],
+            "area":   int(area),
         })
 
     elapsed = int((time.time() - t0) * 1000)
 
-    # Grup istatistikleri
-    unique_groups = set(l for l in labels if l >= 0)
-    group_counts  = {int(g): int(np.sum(labels == g)) for g in unique_groups}
-
     return {
-        "detections":   detections,
-        "group_counts": group_counts,   # { 0: 5, 1: 3, 2: 8 }
-        "total":        len([l for l in labels if l >= 0]),
-        "elapsed_ms":   elapsed,
+        "detections": detections,
+        "count":      len(detections),
+        "elapsed_ms": elapsed,
+        "image_size": [w, h],
     }
 
 
