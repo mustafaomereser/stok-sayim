@@ -1,0 +1,14 @@
+[Unit]
+Description=StokSay Multi-Reference API
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/stok-sayim/with-referance
+ExecStart=/home/ubuntu/stok-sayim/with-referance/venv/bin/python /home/ubuntu/stok-sayim/with-referance/main.py
+Environment="PATH=/home/ubuntu/stok-sayim/with-referance/venv/bin:/usr/bin:/bin"
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
