@@ -1,45 +1,106 @@
 # ╔══════════════════════════════════════════════════════════════════╗
-# ║        StokSay — YOLOv8n Eğitim Notebook (Google Colab)         ║
-# ║  Çalıştırmadan önce: Runtime → T4 GPU seç                       ║
+# ║        StokSay — YOLOv8n Eğitim (Google Colab)                  ║
+# ║  Runtime → T4 GPU seç önce!                                      ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
-# ── ADIM 1: Kurulum ───────────────────────────────────────────────
-#!pip install ultralytics roboflow -q
+# ── HÜCRE 1: Kurulum ──────────────────────────────────────────────
+!pip install ultralytics -q
 
-# ── ADIM 2: Roboflow'dan dataset indir ───────────────────────────
-# roboflow.com → projen → Versions → Export → YOLOv8 formatı
-from roboflow import Roboflow
+# ── HÜCRE 2: Zip yükle ve aç ─────────────────────────────────────
+from google.colab import files
+import zipfile, os, shutil
 
-RF_API_KEY   = "BURAYA_API_KEY"    # Roboflow API key
-RF_WORKSPACE = "BURAYA_WORKSPACE"  # workspace adı
-RF_PROJECT   = "BURAYA_PROJE"      # proje adı
-RF_VERSION   = 1                   # dataset versiyonu
+print("Zip dosyasını seç...")
+uploaded = files.upload()
+zip_name = list(uploaded.keys())[0]
 
-rf = Roboflow(api_key=RF_API_KEY)
-project = rf.workspace(RF_WORKSPACE).project(RF_PROJECT)
-dataset = project.version(RF_VERSION).download("yolov8")
+os.makedirs("/content/dataset", exist_ok=True)
+with zipfile.ZipFile(zip_name, 'r') as z:
+    z.extractall("/content/dataset")
 
-DATASET_PATH = dataset.location
-print("Dataset:", DATASET_PATH)
+print("Zip açıldı:")
+for root, dirs, fs in os.walk("/content/dataset"):
+    for f in fs[:5]:
+        print(" ", os.path.join(root, f))
 
-# ── ADIM 3: Eğitim ───────────────────────────────────────────────
+# ── HÜCRE 3: Train/Valid split ────────────────────────────────────
+import random
+
+BASE      = "/content/dataset"
+TRAIN     = f"{BASE}/images/train"
+VALID     = f"{BASE}/images/valid"
+LBL_TRAIN = f"{BASE}/labels/train"
+LBL_VALID = f"{BASE}/labels/valid"
+
+for d in [TRAIN, VALID, LBL_TRAIN, LBL_VALID]:
+    os.makedirs(d, exist_ok=True)
+
+img_dir = f"{BASE}/images"
+lbl_dir = f"{BASE}/labels"
+
+images = [
+    f for f in os.listdir(img_dir)
+    if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp', '.bmp', '.tiff'))
+    and os.path.isfile(f"{img_dir}/{f}")
+]
+random.seed(42)
+random.shuffle(images)
+
+split      = int(len(images) * 0.8)
+train_imgs = images[:split]
+valid_imgs = images[split:]
+
+def copy_pair(imgs, img_dst, lbl_dst):
+    for img in imgs:
+        lbl = os.path.splitext(img)[0] + ".txt"
+        src_img = f"{img_dir}/{img}"
+        src_lbl = f"{lbl_dir}/{lbl}"
+        if os.path.exists(src_img):
+            shutil.copy(src_img, f"{img_dst}/{img}")
+        if os.path.exists(src_lbl):
+            shutil.copy(src_lbl, f"{lbl_dst}/{lbl}")
+
+copy_pair(train_imgs, TRAIN, LBL_TRAIN)
+copy_pair(valid_imgs, VALID, LBL_VALID)
+
+print(f"Train: {len(train_imgs)} görsel")
+print(f"Valid: {len(valid_imgs)} görsel")
+
+# ── HÜCRE 4: data.yaml ───────────────────────────────────────────
+with open(f"{BASE}/classes.txt") as f:
+    classes = [line.strip() for line in f if line.strip()]
+
+yaml_content = f"""path: {BASE}
+train: images/train
+val:   images/valid
+
+nc: {len(classes)}
+names: {classes}
+"""
+
+with open(f"{BASE}/data.yaml", "w") as f:
+    f.write(yaml_content)
+
+print("data.yaml:")
+print(yaml_content)
+
+# ── HÜCRE 5: Eğitim ──────────────────────────────────────────────
 from ultralytics import YOLO
 
-model = YOLO("yolov8n.pt")  # nano — t3.small için ideal
+model = YOLO("yolov8n.pt")
 
 results = model.train(
-    data=f"{DATASET_PATH}/data.yaml",
+    data=f"{BASE}/data.yaml",
     epochs=100,
     imgsz=640,
-    batch=16,          # OOM alırsan 8 yap
-    patience=20,       # 20 epoch iyileşme olmazsa dur
+    batch=4,
+    patience=20,
     optimizer="AdamW",
     lr0=0.001,
-    device=0,          # GPU
-    project="stoksay",
+    device=0,
+    project="/content/stoksay",
     name="v1",
     exist_ok=True,
-    # Augmentation
     flipud=0.3,
     fliplr=0.5,
     mosaic=1.0,
@@ -52,27 +113,14 @@ results = model.train(
     scale=0.5,
 )
 
-# ── ADIM 4: Sonuçlar ─────────────────────────────────────────────
-print("\n── Eğitim Tamamlandı ──")
-print(f"mAP50:    {results.results_dict.get('metrics/mAP50(B)', 0):.3f}")
+print(f"\nmAP50:    {results.results_dict.get('metrics/mAP50(B)', 0):.3f}")
 print(f"mAP50-95: {results.results_dict.get('metrics/mAP50-95(B)', 0):.3f}")
 
-# ── ADIM 5: Validation ───────────────────────────────────────────
-best = YOLO("stoksay/v1/weights/best.pt")
-val  = best.val(data=f"{DATASET_PATH}/data.yaml")
-print("Val mAP50:", val.box.map50)
-
-# Sınıfları yazdır — bunları server/main.py'e kopyala
-import yaml
-with open(f"{DATASET_PATH}/data.yaml") as f:
-    info = yaml.safe_load(f)
-print("\nSınıflar:", info["names"])
-
-# ── ADIM 6: İndir ────────────────────────────────────────────────
+# ── HÜCRE 6: İndir ───────────────────────────────────────────────
 from google.colab import files
-files.download("stoksay/v1/weights/best.pt")
+files.download("/content/stoksay/v1/weights/best.pt")
 print("best.pt indirildi!")
-
-# EC2'ye yükle:
-# scp best.pt ubuntu@EC2_IP:/home/ubuntu/stok-sayim/server/
-# sudo systemctl restart stoksay
+print()
+print("EC2'ye yükle:")
+print("  scp best.pt ubuntu@EC2_IP:/home/ubuntu/stok-sayim/server/")
+print("  sudo systemctl restart stoksay")
