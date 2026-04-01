@@ -2,7 +2,7 @@
 <html lang="tr">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>StokSay</title>
 <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet">
 <style>
@@ -12,238 +12,258 @@
   --accent: #e8ff47; --text: #f0f0f0; --muted: #555;
   --red: #ff5555; --green: #55ffaa; --radius: 14px;
 }
-body { background:var(--bg); color:var(--text); font-family:'Syne',sans-serif; min-height:100dvh; display:flex; flex-direction:column; overflow:hidden; }
+body { background:var(--bg); color:var(--text); font-family:'Syne',sans-serif; height:100dvh; display:flex; flex-direction:column; overflow:hidden; touch-action:none; }
 
 header { display:flex; align-items:center; padding:13px 20px; border-bottom:1px solid var(--border); flex-shrink:0; gap:10px; }
 .logo { font-size:19px; font-weight:800; letter-spacing:-.5px; margin-right:auto; }
 .logo span { color:var(--accent); }
-.icon-btn { width:34px; height:34px; border-radius:9px; border:1px solid var(--border); background:var(--panel); color:var(--text); font-size:15px; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:border-color .2s; }
+.icon-btn { width:34px; height:34px; border-radius:9px; border:1px solid var(--border); background:var(--panel); color:var(--text); font-size:15px; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:border-color .2s; flex-shrink:0; }
 .icon-btn:hover { border-color:var(--accent); }
 
-main { flex:1; display:grid; grid-template-columns:1fr 260px; min-height:0; overflow:hidden; }
-
-.view-area { display:flex; flex-direction:column; padding:16px; gap:12px; min-height:0; }
+/* ── MAIN: fullscreen canvas + bottom bar ── */
+.view-wrap {
+  flex:1; position:relative; overflow:hidden; display:flex; flex-direction:column;
+}
 
 .canvas-wrap {
-  flex:1; position:relative; border:2px dashed var(--border); border-radius:var(--radius);
-  overflow:hidden; display:flex; align-items:center; justify-content:center;
-  background:#0d0e10; cursor:pointer; transition:border-color .2s; min-height:0;
+  flex:1; position:relative; background:#000;
+  display:flex; align-items:center; justify-content:center; overflow:hidden;
 }
-.canvas-wrap.has-content { border-color:transparent; cursor:default; }
-.canvas-wrap:not(.has-content):hover { border-color:var(--accent); }
-.drop-hint { display:flex; flex-direction:column; align-items:center; gap:10px; color:var(--muted); text-align:center; pointer-events:none; user-select:none; }
-.drop-hint .dicon { font-size:44px; opacity:.2; }
-.drop-hint strong { font-size:15px; color:var(--text); font-weight:700; display:block; margin-bottom:3px; }
-.drop-hint small { font-size:12px; }
-#main-canvas { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; display:none; }
+
+#main-canvas { display:block; max-width:100%; max-height:100%; object-fit:contain; touch-action:none; }
 #live-video   { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; display:none; }
 
-.scan-overlay { position:absolute; inset:0; display:none; flex-direction:column; align-items:center; justify-content:center; gap:14px; z-index:10; background:rgba(11,12,14,.82); border-radius:calc(var(--radius) - 2px); }
+/* Drop hint */
+.drop-hint {
+  position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center;
+  gap:12px; color:var(--muted); text-align:center; pointer-events:none; user-select:none;
+}
+.drop-hint .dicon { font-size:48px; opacity:.18; }
+.drop-hint strong { font-size:16px; color:var(--text); font-weight:700; display:block; margin-bottom:3px; }
+.drop-hint small { font-size:12px; }
+
+/* Scan overlay */
+.scan-overlay { position:absolute; inset:0; display:none; flex-direction:column; align-items:center; justify-content:center; gap:14px; z-index:20; background:rgba(11,12,14,.82); }
 .scan-ring { width:44px; height:44px; border:3px solid var(--border); border-top-color:var(--accent); border-radius:50%; animation:spin .65s linear infinite; }
 @keyframes spin { to{transform:rotate(360deg)} }
 .scan-text { font-family:'Space Mono',monospace; font-size:11px; color:var(--muted); }
-.scan-line { position:absolute; left:0; right:0; height:2px; background:linear-gradient(90deg,transparent,var(--accent),transparent); display:none; animation:scanline 2s ease-in-out infinite; z-index:5; }
-@keyframes scanline { 0%{top:10%;opacity:0}10%{opacity:1}90%{opacity:1}100%{top:90%;opacity:0} }
 
-.action-row { display:flex; gap:10px; flex-shrink:0; }
-.btn { flex:1; padding:12px 14px; border-radius:var(--radius); border:1px solid var(--border); background:var(--panel); color:var(--text); font-family:'Syne',sans-serif; font-size:13px; font-weight:700; cursor:pointer; transition:border-color .2s,opacity .15s,transform .1s; display:flex; align-items:center; justify-content:center; gap:6px; }
+/* Selection box */
+#sel-canvas { position:absolute; inset:0; display:none; z-index:10; cursor:crosshair; touch-action:none; }
+
+/* Step indicator */
+.step-bar {
+  position:absolute; top:12px; left:50%; transform:translateX(-50%);
+  background:rgba(11,12,14,.82); border:1px solid var(--border); border-radius:20px;
+  padding:6px 16px; font-family:'Space Mono',monospace; font-size:11px; color:var(--muted);
+  z-index:15; white-space:nowrap; backdrop-filter:blur(4px);
+  display:none;
+}
+.step-bar.show { display:block; }
+.step-bar b { color:var(--accent); }
+
+/* Result badge */
+.result-badge {
+  position:absolute; top:12px; right:12px;
+  background:var(--accent); color:#000;
+  font-family:'Space Mono',monospace; font-size:13px; font-weight:700;
+  padding:6px 14px; border-radius:20px; z-index:15;
+  display:none;
+}
+.result-badge.show { display:block; }
+
+/* Bottom bar */
+.bottom-bar {
+  flex-shrink:0; background:var(--panel); border-top:1px solid var(--border);
+  padding:12px 16px; display:flex; flex-direction:column; gap:10px;
+}
+
+/* State: initial */
+.bar-initial { display:flex; gap:10px; }
+/* State: select */
+.bar-select  { display:none; gap:10px; }
+/* State: result */
+.bar-result  { display:none; gap:10px; }
+
+.btn { flex:1; padding:12px 14px; border-radius:var(--radius); border:1px solid var(--border); background:var(--bg); color:var(--text); font-family:'Syne',sans-serif; font-size:13px; font-weight:700; cursor:pointer; transition:border-color .2s,opacity .15s,transform .1s; display:flex; align-items:center; justify-content:center; gap:6px; }
 .btn:hover:not(:disabled) { border-color:#3a3b3f; }
 .btn:active:not(:disabled) { transform:scale(.97); }
 .btn:disabled { opacity:.28; cursor:not-allowed; }
 .btn-accent { background:var(--accent); color:#000; border-color:var(--accent); }
-.btn-accent:hover:not(:disabled) { opacity:.85; border-color:var(--accent); }
+.btn-accent:hover:not(:disabled) { opacity:.85; }
+.btn-red { border-color:#3a2020; color:var(--red); }
+.btn-red:hover { border-color:var(--red); }
+
 input[type=file] { display:none; }
 
-.right-panel { background:var(--panel); border-left:1px solid var(--border); display:flex; flex-direction:column; min-height:0; overflow:hidden; }
-.tabs { display:flex; border-bottom:1px solid var(--border); flex-shrink:0; }
-.tab { flex:1; padding:12px 6px; font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.6px; cursor:pointer; color:var(--muted); border:none; background:none; border-bottom:2px solid transparent; transition:color .2s,border-color .2s; }
-.tab.active { color:var(--accent); border-bottom-color:var(--accent); }
-.tab-content { flex:1; overflow-y:auto; display:none; flex-direction:column; min-height:0; }
-.tab-content.active { display:flex; }
-.tab-content::-webkit-scrollbar { width:3px; }
-.tab-content::-webkit-scrollbar-thumb { background:var(--border); border-radius:4px; }
-
-/* RESULTS */
-.results-header { padding:13px 14px 10px; display:flex; align-items:center; justify-content:space-between; flex-shrink:0; }
-.total-badge { background:var(--accent); color:#000; font-family:'Space Mono',monospace; font-size:11px; font-weight:700; padding:3px 10px; border-radius:20px; }
-.results-meta { font-family:'Space Mono',monospace; font-size:10px; color:var(--muted); }
-
-.big-count {
-  display:flex; flex-direction:column; align-items:center; justify-content:center;
-  flex:1; gap:6px; padding:20px;
+/* Settings panel */
+.settings-panel {
+  position:fixed; inset:0; background:rgba(0,0,0,.7); z-index:100;
+  display:none; align-items:flex-end;
 }
-.big-number { font-family:'Space Mono',monospace; font-size:80px; font-weight:700; color:var(--accent); line-height:1; }
-.big-label  { font-size:13px; color:var(--muted); }
-
-/* SETTINGS */
-.settings-body { padding:12px; display:flex; flex-direction:column; gap:14px; overflow-y:auto; }
-.setting-group { display:flex; flex-direction:column; gap:6px; }
-.setting-label { font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.6px; color:var(--muted); }
+.settings-panel.open { display:flex; }
+.settings-sheet {
+  background:var(--panel); border-top:1px solid var(--border); border-radius:20px 20px 0 0;
+  padding:20px; width:100%; display:flex; flex-direction:column; gap:14px;
+  max-height:80vh; overflow-y:auto;
+}
+.sheet-handle { width:36px; height:4px; background:var(--border); border-radius:4px; margin:0 auto 8px; }
+.sheet-title { font-size:14px; font-weight:800; }
+.setting-label { font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.6px; color:var(--muted); margin-bottom:5px; }
 .conf-row { display:flex; align-items:center; gap:10px; }
 .conf-row input[type=range] { flex:1; accent-color:var(--accent); cursor:pointer; }
-.conf-row span { font-family:'Space Mono',monospace; font-size:12px; color:var(--accent); min-width:46px; text-align:right; }
-.setting-hint { font-size:10px; color:var(--muted); line-height:1.5; }
-
-.seg-btns { display:flex; gap:6px; }
-.seg-btn { flex:1; padding:7px; border-radius:8px; border:1px solid var(--border); background:var(--bg); color:var(--muted); font-family:'Syne',sans-serif; font-size:11px; font-weight:700; cursor:pointer; transition:all .15s; text-align:center; }
-.seg-btn.active { background:var(--accent); color:#000; border-color:var(--accent); }
-
+.conf-row span { font-family:'Space Mono',monospace; font-size:12px; color:var(--accent); min-width:36px; text-align:right; }
 .s-input { width:100%; background:var(--bg); border:1px solid var(--border); border-radius:9px; color:var(--text); font-family:'Space Mono',monospace; font-size:11px; padding:8px 12px; outline:none; transition:border-color .2s; }
 .s-input:focus { border-color:var(--accent); }
-.s-input::placeholder { color:var(--muted); }
+.hint { font-size:10px; color:var(--muted); line-height:1.5; margin-top:3px; }
+.save-btn { background:var(--accent); color:#000; border:none; border-radius:10px; padding:12px; font-family:'Syne',sans-serif; font-size:13px; font-weight:800; cursor:pointer; }
 
-.save-btn { width:100%; background:var(--accent); color:#000; border:none; border-radius:10px; padding:11px; font-family:'Syne',sans-serif; font-size:13px; font-weight:800; cursor:pointer; transition:opacity .15s; }
-.save-btn:hover { opacity:.85; }
-
-.notif { position:fixed; bottom:18px; left:50%; transform:translateX(-50%) translateY(8px); background:#18191d; border:1px solid var(--border); border-radius:10px; padding:9px 18px; font-size:11px; font-family:'Space Mono',monospace; color:var(--muted); z-index:999; opacity:0; transition:opacity .25s,transform .25s; pointer-events:none; white-space:nowrap; }
+.notif { position:fixed; bottom:100px; left:50%; transform:translateX(-50%) translateY(8px); background:#18191d; border:1px solid var(--border); border-radius:10px; padding:9px 18px; font-size:11px; font-family:'Space Mono',monospace; color:var(--muted); z-index:999; opacity:0; transition:opacity .25s,transform .25s; pointer-events:none; white-space:nowrap; }
 .notif.show { opacity:1; transform:translateX(-50%) translateY(0); }
 .notif.ok  { border-color:var(--green); color:var(--green); }
 .notif.err { border-color:var(--red); color:var(--red); }
-
-@media(max-width:660px){body{overflow:auto}main{grid-template-columns:1fr;grid-template-rows:55vw auto}.right-panel{border-left:none;border-top:1px solid var(--border);max-height:340px}.view-area{padding:12px;gap:10px}header{padding:11px 14px}}
 </style>
 </head>
 <body>
 
 <header>
   <div class="logo">Stok<span>Say</span></div>
-  <button class="icon-btn" id="settings-toggle">⚙️</button>
+  <button class="icon-btn" id="settings-btn">⚙️</button>
 </header>
 
-<main>
-  <div class="view-area">
-    <div class="canvas-wrap" id="canvas-wrap">
-      <div class="scan-line" id="scan-line"></div>
-      <div class="drop-hint" id="drop-hint">
-        <div class="dicon">📦</div>
-        <div>
-          <strong>Fotoğraf yükle veya sürükle</strong>
-          <small>ya da kameradan çek</small>
-        </div>
-      </div>
-      <canvas id="main-canvas"></canvas>
-      <video id="live-video" autoplay playsinline muted></video>
-      <div class="scan-overlay" id="scan-overlay">
-        <div class="scan-ring"></div>
-        <div class="scan-text">Objeler sayılıyor...</div>
+<div class="view-wrap">
+  <div class="canvas-wrap" id="canvas-wrap">
+
+    <div class="drop-hint" id="drop-hint">
+      <div class="dicon">📦</div>
+      <div>
+        <strong>Fotoğraf çek veya yükle</strong>
+        <small>Sonra saymak istediğin objeyi seç</small>
       </div>
     </div>
-    <div class="action-row">
+
+    <canvas id="main-canvas"></canvas>
+    <canvas id="sel-canvas"></canvas>
+    <video id="live-video" autoplay playsinline muted></video>
+
+    <div class="step-bar" id="step-bar"></div>
+    <div class="result-badge" id="result-badge"></div>
+
+    <div class="scan-overlay" id="scan-overlay">
+      <div class="scan-ring"></div>
+      <div class="scan-text">Objeler aranıyor...</div>
+    </div>
+  </div>
+
+  <div class="bottom-bar">
+    <!-- ADIM 1: Fotoğraf yükle -->
+    <div class="bar-initial" id="bar-initial">
       <button class="btn" id="cam-btn">📷 Kamera</button>
       <button class="btn" id="upload-btn">🗂 Yükle</button>
-      <button class="btn btn-accent" id="analyze-btn" disabled>🔍 Say</button>
-    </div>
-    <input type="file" id="file-input" accept="image/jpeg,image/png,image/webp,image/bmp">
-  </div>
-
-  <div class="right-panel">
-    <div class="tabs">
-      <button class="tab active" data-tab="results">Sonuç</button>
-      <button class="tab" data-tab="settings">⚙ Ayarlar</button>
     </div>
 
-    <!-- RESULTS -->
-    <div class="tab-content active" id="tab-results">
-      <div class="results-header">
-        <div class="total-badge" id="total-badge">0 adet</div>
-        <div class="results-meta" id="results-meta">—</div>
-      </div>
-      <div class="big-count" id="big-count">
-        <div class="big-number" id="big-number">—</div>
-        <div class="big-label">obje tespit edildi</div>
-      </div>
+    <!-- ADIM 2: Obje seç ve say -->
+    <div class="bar-select" id="bar-select">
+      <button class="btn btn-red" id="cancel-btn">✕ İptal</button>
+      <button class="btn btn-accent" id="count-btn" disabled>🔍 Say</button>
     </div>
 
-    <!-- SETTINGS -->
-    <div class="tab-content" id="tab-settings">
-      <div class="settings-body">
-
-        <div class="setting-group">
-          <div class="setting-label">API Endpoint</div>
-          <input class="s-input" type="text" id="api-url" placeholder="https://stoksay.aracservistakip.com/detect">
-        </div>
-
-        <div class="setting-group">
-          <div class="setting-label">Threshold Modu</div>
-          <div class="seg-btns">
-            <div class="seg-btn active" data-val="otsu">Otsu</div>
-            <div class="seg-btn" data-val="adaptive">Adaptive</div>
-          </div>
-          <div class="setting-hint">Otsu: düzgün ışık için<br>Adaptive: değişken ışık için</div>
-        </div>
-
-        <div class="setting-group">
-          <div class="setting-label">Min Obje Alanı (px²)</div>
-          <div class="conf-row">
-            <input type="range" id="min-area" min="50" max="2000" value="200" step="50">
-            <span id="min-area-val">200</span>
-          </div>
-          <div class="setting-hint">Küçük → gürültü dahil olabilir<br>Büyük → küçük objeler atlanır</div>
-        </div>
-
-        <div class="setting-group">
-          <div class="setting-label">Max Obje Alanı (px²)</div>
-          <div class="conf-row">
-            <input type="range" id="max-area" min="1000" max="100000" value="50000" step="1000">
-            <span id="max-area-val">50000</span>
-          </div>
-          <div class="setting-hint">Arka plan ve büyük alanları eler</div>
-        </div>
-
-        <div class="setting-group">
-          <div class="setting-label">Blur</div>
-          <div class="conf-row">
-            <input type="range" id="blur-val" min="1" max="21" value="5" step="2">
-            <span id="blur-label">5</span>
-          </div>
-          <div class="setting-hint">Yüksek → gürültü azalır, kenar kayar</div>
-        </div>
-
-        <button class="save-btn" id="save-settings">💾 Kaydet</button>
-      </div>
+    <!-- ADIM 3: Sonuç -->
+    <div class="bar-result" id="bar-result">
+      <button class="btn" id="reselect-btn">↩ Tekrar Seç</button>
+      <button class="btn" id="new-btn">📷 Yeni</button>
     </div>
   </div>
-</main>
+</div>
+
+<input type="file" id="file-input" accept="image/jpeg,image/png,image/webp,image/bmp">
+
+<!-- SETTINGS -->
+<div class="settings-panel" id="settings-panel">
+  <div class="settings-sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title">Ayarlar</div>
+
+    <div>
+      <div class="setting-label">API Endpoint</div>
+      <input class="s-input" type="text" id="api-url" placeholder="https://stoksay.aracservistakip.com/detect">
+    </div>
+
+    <div>
+      <div class="setting-label">YOLO Güven Eşiği</div>
+      <div class="conf-row">
+        <input type="range" id="conf-slider" min="10" max="70" value="20" step="5">
+        <span id="conf-val">20%</span>
+      </div>
+      <div class="hint">Düşük → daha fazla adayı tarar</div>
+    </div>
+
+    <div>
+      <div class="setting-label">Benzerlik Eşiği</div>
+      <div class="conf-row">
+        <input type="range" id="sim-slider" min="30" max="85" value="55" step="5">
+        <span id="sim-val">55%</span>
+      </div>
+      <div class="hint">Düşük → daha gevşek eşleşme</div>
+    </div>
+
+    <button class="save-btn" id="save-btn">💾 Kaydet</button>
+  </div>
+</div>
 
 <div class="notif" id="notif"></div>
 
 <script>
 // ── CONFIG ───────────────────────────────────────────────────────
-function loadCfg() { try { return JSON.parse(localStorage.getItem('stoksay_v4') || '{}'); } catch { return {}; } }
-function saveCfg(c) { localStorage.setItem('stoksay_v4', JSON.stringify(c)); }
+function loadCfg() { try { return JSON.parse(localStorage.getItem('stoksay_v5') || '{}'); } catch { return {}; } }
+function saveCfg(c) { localStorage.setItem('stoksay_v5', JSON.stringify(c)); }
 let cfg = loadCfg();
-if (!cfg.apiUrl)    cfg.apiUrl    = window.location.origin + '/detect';
-if (!cfg.minArea)   cfg.minArea   = 200;
-if (!cfg.maxArea)   cfg.maxArea   = 50000;
-if (!cfg.blur)      cfg.blur      = 5;
-if (!cfg.threshold) cfg.threshold = 'otsu';
+if (!cfg.apiUrl) cfg.apiUrl = window.location.origin + '/detect';
+if (!cfg.conf)   cfg.conf   = 20;
+if (!cfg.sim)    cfg.sim    = 55;
 
 // ── REFS ─────────────────────────────────────────────────────────
 const canvasWrap  = document.getElementById('canvas-wrap');
 const mainCanvas  = document.getElementById('main-canvas');
-const ctx         = mainCanvas.getContext('2d');
+const mCtx        = mainCanvas.getContext('2d');
+const selCanvas   = document.getElementById('sel-canvas');
+const sCtx        = selCanvas.getContext('2d');
 const liveVideo   = document.getElementById('live-video');
 const dropHint    = document.getElementById('drop-hint');
 const scanOverlay = document.getElementById('scan-overlay');
-const scanLine    = document.getElementById('scan-line');
+const stepBar     = document.getElementById('step-bar');
+const resultBadge = document.getElementById('result-badge');
 const fileInput   = document.getElementById('file-input');
-const uploadBtn   = document.getElementById('upload-btn');
-const analyzeBtn  = document.getElementById('analyze-btn');
-const camBtn      = document.getElementById('cam-btn');
-const totalBadge  = document.getElementById('total-badge');
-const resultsMeta = document.getElementById('results-meta');
-const bigNumber   = document.getElementById('big-number');
-const notifEl     = document.getElementById('notif');
-const apiUrlInput = document.getElementById('api-url');
-const minAreaEl   = document.getElementById('min-area');
-const minAreaVal  = document.getElementById('min-area-val');
-const maxAreaEl   = document.getElementById('max-area');
-const maxAreaVal  = document.getElementById('max-area-val');
-const blurEl      = document.getElementById('blur-val');
-const blurLabel   = document.getElementById('blur-label');
-const saveBtn     = document.getElementById('save-settings');
 
-let currentImg = null, camStream = null, isLive = false;
+// Bottom bars
+const barInitial  = document.getElementById('bar-initial');
+const barSelect   = document.getElementById('bar-select');
+const barResult   = document.getElementById('bar-result');
+
+const camBtn      = document.getElementById('cam-btn');
+const uploadBtn   = document.getElementById('upload-btn');
+const cancelBtn   = document.getElementById('cancel-btn');
+const countBtn    = document.getElementById('count-btn');
+const reselectBtn = document.getElementById('reselect-btn');
+const newBtn      = document.getElementById('new-btn');
+
+const settingsBtn   = document.getElementById('settings-btn');
+const settingsPanel = document.getElementById('settings-panel');
+const apiUrlInput   = document.getElementById('api-url');
+const confSlider    = document.getElementById('conf-slider');
+const confVal       = document.getElementById('conf-val');
+const simSlider     = document.getElementById('sim-slider');
+const simVal        = document.getElementById('sim-val');
+const saveSettBtn   = document.getElementById('save-btn');
+const notifEl       = document.getElementById('notif');
+
+// ── STATE ─────────────────────────────────────────────────────────
+let currentImg  = null;  // HTMLImageElement
+let camStream   = null;
+let isLive      = false;
+let isSelecting = false;
+let selStart    = null;  // {x, y} canvas coords
+let selRect     = null;  // {x, y, w, h} canvas coords
 
 // ── NOTIF ────────────────────────────────────────────────────────
 let nTimer;
@@ -252,64 +272,73 @@ function notif(msg, cls='') {
   clearTimeout(nTimer); nTimer = setTimeout(() => notifEl.classList.remove('show'), 3000);
 }
 
-// ── TABS ─────────────────────────────────────────────────────────
-document.querySelectorAll('.tab').forEach(tab => {
-  tab.addEventListener('click', () => {
-    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-    document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
-    tab.classList.add('active');
-    document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
-  });
-});
-document.getElementById('settings-toggle').addEventListener('click', () => {
-  document.querySelector('.tab[data-tab="settings"]').click();
-});
-
 // ── SETTINGS ─────────────────────────────────────────────────────
 function initSettings() {
-  apiUrlInput.value   = cfg.apiUrl;
-  minAreaEl.value     = cfg.minArea;   minAreaVal.textContent = cfg.minArea;
-  maxAreaEl.value     = cfg.maxArea;   maxAreaVal.textContent = cfg.maxArea;
-  blurEl.value        = cfg.blur;      blurLabel.textContent  = cfg.blur;
-  document.querySelectorAll('.seg-btn').forEach(b => {
-    b.classList.toggle('active', b.dataset.val === cfg.threshold);
-  });
+  apiUrlInput.value = cfg.apiUrl;
+  confSlider.value  = cfg.conf; confVal.textContent = cfg.conf + '%';
+  simSlider.value   = cfg.sim;  simVal.textContent  = cfg.sim + '%';
 }
-minAreaEl.addEventListener('input', () => minAreaVal.textContent = minAreaEl.value);
-maxAreaEl.addEventListener('input', () => maxAreaVal.textContent = maxAreaEl.value);
-blurEl.addEventListener('input',    () => blurLabel.textContent  = blurEl.value);
-document.querySelectorAll('.seg-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('.seg-btn').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    cfg.threshold = btn.dataset.val;
-  });
+confSlider.addEventListener('input', () => confVal.textContent = confSlider.value + '%');
+simSlider.addEventListener('input',  () => simVal.textContent  = simSlider.value + '%');
+settingsBtn.addEventListener('click', () => settingsPanel.classList.add('open'));
+settingsPanel.addEventListener('click', e => { if (e.target === settingsPanel) settingsPanel.classList.remove('open'); });
+saveSettBtn.addEventListener('click', () => {
+  cfg.apiUrl = apiUrlInput.value.trim();
+  cfg.conf   = +confSlider.value;
+  cfg.sim    = +simSlider.value;
+  saveCfg(cfg);
+  settingsPanel.classList.remove('open');
+  notif('Kaydedildi', 'ok');
 });
-saveBtn.addEventListener('click', () => {
-  cfg.apiUrl  = apiUrlInput.value.trim();
-  cfg.minArea = +minAreaEl.value;
-  cfg.maxArea = +maxAreaEl.value;
-  cfg.blur    = +blurEl.value;
-  saveCfg(cfg); notif('Kaydedildi', 'ok');
-});
+
+// ── STATE MACHINE ─────────────────────────────────────────────────
+// States: 'empty' | 'loaded' | 'result'
+function setState(state) {
+  barInitial.style.display = 'none';
+  barSelect.style.display  = 'none';
+  barResult.style.display  = 'none';
+
+  if (state === 'empty') {
+    barInitial.style.display = 'flex';
+    stepBar.classList.remove('show');
+    resultBadge.classList.remove('show');
+    selCanvas.style.display = 'none';
+  } else if (state === 'loaded') {
+    barSelect.style.display = 'flex';
+    stepBar.innerHTML = '<b>Bir objeyi çiz</b> → Say';
+    stepBar.classList.add('show');
+    resultBadge.classList.remove('show');
+    selCanvas.style.display = 'block';
+    countBtn.disabled = true;
+    selRect = null;
+    redrawSel();
+  } else if (state === 'result') {
+    barResult.style.display = 'flex';
+    stepBar.classList.remove('show');
+    selCanvas.style.display = 'none';
+  }
+}
 
 // ── IMAGE LOAD ────────────────────────────────────────────────────
 function loadImageEl(imgEl) {
-  stopCamera(); currentImg = imgEl;
-  const wrap = canvasWrap.getBoundingClientRect();
-  const scale = Math.min((wrap.width||600)/imgEl.naturalWidth, (wrap.height||400)/imgEl.naturalHeight, 1);
+  stopCamera();
+  currentImg = imgEl;
+
+  // Canvas boyutunu görüntüye göre ayarla
+  const wrapW = canvasWrap.clientWidth  || window.innerWidth;
+  const wrapH = canvasWrap.clientHeight || window.innerHeight * 0.7;
+  const scale = Math.min(wrapW / imgEl.naturalWidth, wrapH / imgEl.naturalHeight, 1);
+
   mainCanvas.width  = Math.round(imgEl.naturalWidth  * scale);
   mainCanvas.height = Math.round(imgEl.naturalHeight * scale);
-  ctx.drawImage(imgEl, 0, 0, mainCanvas.width, mainCanvas.height);
-  mainCanvas.style.display = 'block';
-  liveVideo.style.display  = 'none';
-  dropHint.style.display   = 'none';
-  canvasWrap.classList.add('has-content');
-  analyzeBtn.disabled = false;
-  bigNumber.textContent = '—';
-  totalBadge.textContent = '0 adet';
-  resultsMeta.textContent = '—';
+  selCanvas.width   = mainCanvas.width;
+  selCanvas.height  = mainCanvas.height;
+
+  mCtx.drawImage(imgEl, 0, 0, mainCanvas.width, mainCanvas.height);
+  dropHint.style.display = 'none';
+  setState('loaded');
 }
+
 function fileToImg(file) {
   return new Promise((res, rej) => {
     const url = URL.createObjectURL(file);
@@ -318,135 +347,248 @@ function fileToImg(file) {
     img.onerror = rej; img.src = url;
   });
 }
+
 uploadBtn.addEventListener('click', () => fileInput.click());
 fileInput.addEventListener('change', async e => {
   const f = e.target.files[0]; if (!f) return;
   try { loadImageEl(await fileToImg(f)); } catch { notif('Görsel yüklenemedi', 'err'); }
   fileInput.value = '';
 });
-canvasWrap.addEventListener('dragover', e => { e.preventDefault(); if (!canvasWrap.classList.contains('has-content')) canvasWrap.style.borderColor='var(--accent)'; });
-canvasWrap.addEventListener('dragleave', () => canvasWrap.style.borderColor = '');
-canvasWrap.addEventListener('drop', async e => {
-  e.preventDefault(); canvasWrap.style.borderColor = '';
-  const f = e.dataTransfer.files[0];
-  if (!f || !f.type.startsWith('image/')) return notif('Sadece görsel yüklenebilir', 'err');
-  try { loadImageEl(await fileToImg(f)); } catch { notif('Görsel yüklenemedi', 'err'); }
-});
-canvasWrap.addEventListener('click', () => { if (!canvasWrap.classList.contains('has-content') && !isLive) fileInput.click(); });
 
 // ── CAMERA ────────────────────────────────────────────────────────
 camBtn.addEventListener('click', async () => {
   if (isLive) { captureFromLive(); return; }
   try {
-    camStream = await navigator.mediaDevices.getUserMedia({ video:{facingMode:'environment',width:{ideal:1920},height:{ideal:1080}}, audio:false });
+    camStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width:{ideal:1920}, height:{ideal:1080} },
+      audio: false
+    });
     liveVideo.srcObject = camStream;
     liveVideo.style.display = 'block';
     mainCanvas.style.display = 'none';
     dropHint.style.display   = 'none';
-    canvasWrap.classList.add('has-content');
-    scanLine.style.display = 'block';
     isLive = true;
     camBtn.textContent = '📸 Çek';
-    camBtn.style.borderColor = 'var(--accent)';
-    analyzeBtn.disabled = false;
+    barInitial.style.display = 'flex';
   } catch { notif('Kamera izni reddedildi', 'err'); }
 });
+
 function captureFromLive() {
   const w = liveVideo.videoWidth, h = liveVideo.videoHeight;
   const tmp = document.createElement('canvas'); tmp.width=w; tmp.height=h;
-  tmp.getContext('2d').drawImage(liveVideo,0,0);
-  const img = new Image(); img.onload = () => loadImageEl(img);
-  img.src = tmp.toDataURL('image/jpeg',.92); stopCamera();
+  tmp.getContext('2d').drawImage(liveVideo, 0, 0);
+  const img = new Image();
+  img.onload = () => { mainCanvas.style.display = 'block'; loadImageEl(img); };
+  img.src = tmp.toDataURL('image/jpeg', .92);
+  stopCamera();
 }
+
 function stopCamera() {
   if (camStream) { camStream.getTracks().forEach(t=>t.stop()); camStream=null; }
-  liveVideo.style.display='none'; scanLine.style.display='none'; isLive=false;
-  camBtn.innerHTML='📷 Kamera'; camBtn.style.borderColor='';
+  liveVideo.style.display = 'none';
+  mainCanvas.style.display = 'block';
+  isLive = false;
+  camBtn.innerHTML = '📷 Kamera';
 }
 
-// ── ANALYZE ───────────────────────────────────────────────────────
-analyzeBtn.addEventListener('click', async () => {
-  if (!currentImg && !isLive) return;
-  if (isLive) { captureFromLive(); return; }
+// ── SELECTION (mouse + touch) ─────────────────────────────────────
+function getCanvasPos(e) {
+  const rect = selCanvas.getBoundingClientRect();
+  const scaleX = selCanvas.width  / rect.width;
+  const scaleY = selCanvas.height / rect.height;
+  const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+  const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+  return {
+    x: (clientX - rect.left) * scaleX,
+    y: (clientY - rect.top)  * scaleY,
+  };
+}
+
+function redrawSel() {
+  sCtx.clearRect(0, 0, selCanvas.width, selCanvas.height);
+  if (!selRect) return;
+  const { x, y, w, h } = selRect;
+
+  // Yarı saydam overlay — dışarısını karart
+  sCtx.fillStyle = 'rgba(0,0,0,0.45)';
+  sCtx.fillRect(0, 0, selCanvas.width, selCanvas.height);
+  sCtx.clearRect(x, y, w, h);
+
+  // Seçim kenarlığı
+  sCtx.strokeStyle = '#e8ff47';
+  sCtx.lineWidth   = 2;
+  sCtx.strokeRect(x, y, w, h);
+
+  // Köşe L-bracket
+  const cs = Math.min(Math.abs(w), Math.abs(h)) * .15;
+  sCtx.lineWidth = 3;
+  [[x,y],[x+w,y],[x,y+h],[x+w,y+h]].forEach(([cx,cy], i) => {
+    sCtx.beginPath();
+    sCtx.moveTo(cx + (i%2===0 ? cs : -cs), cy);
+    sCtx.lineTo(cx, cy);
+    sCtx.lineTo(cx, cy + (i<2 ? cs : -cs));
+    sCtx.stroke();
+  });
+}
+
+function onPointerDown(e) {
+  e.preventDefault();
+  isSelecting = true;
+  selStart = getCanvasPos(e);
+  selRect  = null;
+  countBtn.disabled = true;
+  redrawSel();
+}
+
+function onPointerMove(e) {
+  if (!isSelecting) return;
+  e.preventDefault();
+  const pos = getCanvasPos(e);
+  selRect = {
+    x: Math.min(selStart.x, pos.x),
+    y: Math.min(selStart.y, pos.y),
+    w: Math.abs(pos.x - selStart.x),
+    h: Math.abs(pos.y - selStart.y),
+  };
+  redrawSel();
+}
+
+function onPointerUp(e) {
+  if (!isSelecting) return;
+  e.preventDefault();
+  isSelecting = false;
+  if (selRect && selRect.w > 10 && selRect.h > 10) {
+    countBtn.disabled = false;
+    stepBar.innerHTML = 'Obje seçildi → <b>Say</b>';
+  } else {
+    selRect = null;
+    redrawSel();
+    stepBar.innerHTML = '<b>Bir objeyi çiz</b> → Say';
+  }
+}
+
+selCanvas.addEventListener('mousedown',  onPointerDown);
+selCanvas.addEventListener('mousemove',  onPointerMove);
+selCanvas.addEventListener('mouseup',    onPointerUp);
+selCanvas.addEventListener('touchstart', onPointerDown, { passive: false });
+selCanvas.addEventListener('touchmove',  onPointerMove, { passive: false });
+selCanvas.addEventListener('touchend',   onPointerUp,   { passive: false });
+
+// ── CANCEL / RESELECT / NEW ───────────────────────────────────────
+cancelBtn.addEventListener('click', () => {
+  if (currentImg) {
+    mCtx.clearRect(0, 0, mainCanvas.width, mainCanvas.height);
+    mCtx.drawImage(currentImg, 0, 0, mainCanvas.width, mainCanvas.height);
+  }
+  setState('empty');
+  dropHint.style.display = 'flex';
+  currentImg = null;
+});
+
+reselectBtn.addEventListener('click', () => {
+  // Görseli sıfırla, tekrar seçim yap
+  mCtx.clearRect(0, 0, mainCanvas.width, mainCanvas.height);
+  mCtx.drawImage(currentImg, 0, 0, mainCanvas.width, mainCanvas.height);
+  setState('loaded');
+});
+
+newBtn.addEventListener('click', () => {
+  cancelBtn.click();
+});
+
+// ── COUNT ─────────────────────────────────────────────────────────
+countBtn.addEventListener('click', async () => {
+  if (!selRect || !currentImg) return;
 
   scanOverlay.style.display = 'flex';
-  analyzeBtn.disabled = true;
+  countBtn.disabled = true;
 
   try {
-    const blob = await new Promise(res => mainCanvas.toBlob(res, 'image/jpeg', .92));
-    const fd = new FormData();
-    fd.append('image',          blob, 'frame.jpg');
-    fd.append('min_area',       cfg.minArea.toString());
-    fd.append('max_area',       cfg.maxArea.toString());
-    fd.append('blur',           cfg.blur.toString());
-    fd.append('threshold_type', cfg.threshold);
+    // Ana görseli blob olarak al
+    const mainBlob = await new Promise(res => mainCanvas.toBlob(res, 'image/jpeg', .92));
 
-    const t0 = Date.now();
+    // Seçilen alanı crop et
+    const cropCanvas = document.createElement('canvas');
+    cropCanvas.width  = Math.round(selRect.w);
+    cropCanvas.height = Math.round(selRect.h);
+    cropCanvas.getContext('2d').drawImage(
+      mainCanvas,
+      selRect.x, selRect.y, selRect.w, selRect.h,
+      0, 0, selRect.w, selRect.h
+    );
+    const cropBlob = await new Promise(res => cropCanvas.toBlob(res, 'image/jpeg', .92));
+
+    const fd = new FormData();
+    fd.append('image',      mainBlob, 'frame.jpg');
+    fd.append('reference',  cropBlob, 'ref.jpg');
+    fd.append('confidence', (cfg.conf / 100).toString());
+    fd.append('similarity',  (cfg.sim  / 100).toString());
+
+    const t0  = Date.now();
     const res = await fetch(cfg.apiUrl, { method:'POST', body:fd });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     const elapsed = Date.now() - t0;
 
-    // Ölçek faktörü — sunucu orijinal boyutta işliyor, canvas küçültülmüş
-    const scaleX = mainCanvas.width  / data.image_size[0];
-    const scaleY = mainCanvas.height / data.image_size[1];
+    drawDetections(data.detections || [], data.image_size);
 
-    drawDetections(data.detections || [], scaleX, scaleY);
-
-    bigNumber.textContent   = data.count;
-    totalBadge.textContent  = data.count + ' adet';
-    resultsMeta.textContent = elapsed + 'ms';
-
+    resultBadge.textContent = `${data.count} adet`;
+    resultBadge.classList.add('show');
+    setState('result');
     notif(`${data.count} obje bulundu (${elapsed}ms)`, 'ok');
 
   } catch(e) {
     notif('Hata: ' + e.message, 'err');
-    console.error(e);
+    countBtn.disabled = false;
   } finally {
     scanOverlay.style.display = 'none';
-    analyzeBtn.disabled = false;
   }
 });
 
-// ── ÇİZİM ────────────────────────────────────────────────────────
-const DOT_COLOR = '#e8ff47';
+// ── DRAW ─────────────────────────────────────────────────────────
+function drawDetections(detections, imageSize) {
+  // Orijinal görüntüyü yeniden çiz
+  mCtx.clearRect(0, 0, mainCanvas.width, mainCanvas.height);
+  mCtx.drawImage(currentImg, 0, 0, mainCanvas.width, mainCanvas.height);
 
-function drawDetections(detections, scaleX, scaleY) {
-  ctx.clearRect(0, 0, mainCanvas.width, mainCanvas.height);
-  ctx.drawImage(currentImg, 0, 0, mainCanvas.width, mainCanvas.height);
+  const scaleX = mainCanvas.width  / imageSize[0];
+  const scaleY = mainCanvas.height / imageSize[1];
 
   detections.forEach((det, i) => {
     const [x, y, w, h] = det.bbox;
-    const sx = x * scaleX, sy = y * scaleY, sw = w * scaleX, sh = h * scaleY;
-    const cx = det.center[0] * scaleX, cy = det.center[1] * scaleY;
+    const sx = x*scaleX, sy = y*scaleY, sw = w*scaleX, sh = h*scaleY;
+    const cx = sx + sw/2, cy = sy + sh/2;
     const num = i + 1;
-
-    // Kenarlık
-    ctx.strokeStyle = DOT_COLOR;
-    ctx.lineWidth   = Math.max(1.5, mainCanvas.width / 600);
-    ctx.strokeRect(sx, sy, sw, sh);
+    const lw  = Math.max(1.5, mainCanvas.width / 600);
 
     // Dolgu
-    ctx.fillStyle = 'rgba(232,255,71,0.12)';
-    ctx.fillRect(sx, sy, sw, sh);
+    mCtx.fillStyle = 'rgba(74,144,255,0.18)';
+    mCtx.fillRect(sx, sy, sw, sh);
 
-    // Numara balonu — merkez
-    const r = Math.max(11, Math.min(sw, sh) * .3);
-    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
-    ctx.fillStyle = DOT_COLOR; ctx.fill();
-    ctx.strokeStyle = 'rgba(0,0,0,.4)'; ctx.lineWidth = Math.max(1, r*.1); ctx.stroke();
+    // Kenarlık
+    mCtx.strokeStyle = '#4A90FF';
+    mCtx.lineWidth   = lw * 1.5;
+    mCtx.strokeRect(sx+lw/2, sy+lw/2, sw-lw, sh-lw);
+
+    // Numara balonu
+    const r = Math.max(11, Math.min(sw, sh) * .28);
+    mCtx.beginPath(); mCtx.arc(cx, cy, r, 0, Math.PI*2);
+    mCtx.fillStyle = '#4A90FF'; mCtx.fill();
+    mCtx.strokeStyle = 'rgba(255,255,255,.9)';
+    mCtx.lineWidth = Math.max(1.5, r*.12); mCtx.stroke();
 
     const fs = Math.max(8, Math.round(r * 1.05));
-    ctx.font = `800 ${fs}px Space Mono, monospace`;
-    ctx.fillStyle = '#000'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.shadowColor = 'rgba(0,0,0,.2)'; ctx.shadowBlur = 2;
-    ctx.fillText(String(num), cx, cy + 1);
-    ctx.shadowBlur = 0; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    mCtx.font = `800 ${fs}px Space Mono, monospace`;
+    mCtx.fillStyle = '#fff'; mCtx.textAlign = 'center'; mCtx.textBaseline = 'middle';
+    mCtx.shadowColor = 'rgba(0,0,0,.4)'; mCtx.shadowBlur = 3;
+    mCtx.fillText(String(num), cx, cy + 1);
+    mCtx.shadowBlur = 0; mCtx.textAlign = 'left'; mCtx.textBaseline = 'alphabetic';
   });
 }
 
 // ── BOOT ─────────────────────────────────────────────────────────
 initSettings();
+setState('empty');
 </script>
 </body>
 </html>
