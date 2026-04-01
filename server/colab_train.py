@@ -87,7 +87,7 @@ print(yaml_content)
 # ── HÜCRE 5: Eğitim ──────────────────────────────────────────────
 from ultralytics import YOLO
 
-model = YOLO("yolov8n.pt")
+model = YOLO("yolov8m.pt")
 
 results = model.train(
     data=f"{BASE}/data.yaml",
