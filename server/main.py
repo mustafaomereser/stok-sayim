@@ -1,21 +1,18 @@
 """
-StokSay Backend — YOLO + CLIP + Tek Referans
-Kullanıcı fotoğraftan bir obje seçer,
-sistem benzerlerini bulup sayar. iScanner mantığı.
+StokSay Backend — YOLOv8 + FastAPI
+best.pt varsa onu kullanır, yoksa yolov8n.pt ile çalışır.
 """
 
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
-import torch
-import clip
-from PIL import Image
 import numpy as np
 import cv2
 import time
-import io
+import os
 
-# PyTorch 2.6 fix
+# PyTorch 2.6 fix — ultralytics yüklemeden önce yapılmalı
+import torch
 _orig_load = torch.load
 def _patched_load(*args, **kwargs):
     kwargs.setdefault("weights_only", False)
@@ -24,7 +21,26 @@ torch.load = _patched_load
 
 from ultralytics import YOLO
 
-app = FastAPI(title="StokSay API", version="5.0.0")
+# ── CONFIG ────────────────────────────────────────────────────────
+CUSTOM_MODEL  = "best.pt"       # Eğitilmiş model
+FALLBACK_MODEL = "yolov8n.pt"   # Yoksa bununla çalış
+IMG_SIZE      = 640
+MAX_DET       = 300
+DEVICE        = "cpu"
+
+# ── MODEL YÜKLEMESİ ──────────────────────────────────────────────
+model_path = CUSTOM_MODEL if os.path.exists(CUSTOM_MODEL) else FALLBACK_MODEL
+print(f"Model yükleniyor: {model_path}")
+model = YOLO(model_path)
+model.to(DEVICE)
+
+# Warm-up
+dummy = np.zeros((IMG_SIZE, IMG_SIZE, 3), dtype=np.uint8)
+model.predict(dummy, imgsz=IMG_SIZE, verbose=False)
+print(f"Model hazır! Sınıflar: {list(model.names.values())}")
+
+# ── APP ───────────────────────────────────────────────────────────
+app = FastAPI(title="StokSay API", version="1.0.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -32,103 +48,79 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-DEVICE = "cpu"
-
-print("YOLO yükleniyor...")
-yolo = YOLO("models/yolov8n.pt")
-
-print("CLIP yükleniyor...")
-clip_model, clip_preprocess = clip.load("ViT-B/32", device=DEVICE)
-clip_model.eval()
-print("Modeller hazır!")
-
-
-def normalize(t):
-    return t / t.norm(dim=-1, keepdim=True)
-
-def get_embedding(img: Image.Image) -> torch.Tensor:
-    tensor = clip_preprocess(img).unsqueeze(0).to(DEVICE)
-    with torch.no_grad():
-        emb = clip_model.encode_image(tensor)
-    return normalize(emb)
-
-
+# ── HEALTH ───────────────────────────────────────────────────────
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    return {
+        "status":  "ok",
+        "model":   model_path,
+        "classes": model.names,
+        "device":  DEVICE,
+    }
 
-
+# ── DETECT ───────────────────────────────────────────────────────
 @app.post("/detect")
 async def detect(
-    # Ana fotoğraf
-    image: UploadFile = File(...),
-    # Kullanıcının seçtiği referans crop (tek obje)
-    reference: UploadFile = File(...),
-    # YOLO güven eşiği
-    confidence: float = Form(default=0.2),
-    # CLIP benzerlik eşiği — düşük = daha fazla eşleşir
-    similarity: float = Form(default=0.55),
+    image:      UploadFile = File(...),
+    confidence: float      = Form(default=0.4),
 ):
+    """
+    Fotoğrafı alır, YOLOv8 ile analiz eder.
+
+    Response:
+    {
+        "detections": [
+            { "label": "somun", "confidence": 0.87, "bbox": [x, y, w, h] }
+        ],
+        "count":      5,
+        "elapsed_ms": 230,
+        "image_size": [w, h]
+    }
+    """
     t0 = time.time()
 
-    # ── Ana görseli oku ──────────────────────────────────────────
     raw = await image.read()
-    img_array = np.frombuffer(raw, dtype=np.uint8)
-    frame = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+    arr = np.frombuffer(raw, dtype=np.uint8)
+    frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+
     if frame is None:
-        raise HTTPException(400, "Ana görsel okunamadı")
+        raise HTTPException(400, "Görsel okunamadı")
 
     orig_h, orig_w = frame.shape[:2]
 
-    # Büyük görseli küçült
+    # Büyük görseli küçült — t3.small için
     if max(orig_h, orig_w) > 1280:
         scale = 1280 / max(orig_h, orig_w)
         frame = cv2.resize(frame, (int(orig_w * scale), int(orig_h * scale)))
 
-    pil_frame = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
     h, w = frame.shape[:2]
 
-    # ── Referans crop embedding ──────────────────────────────────
-    ref_raw = await reference.read()
-    ref_img = Image.open(io.BytesIO(ref_raw)).convert("RGB")
-    ref_emb = get_embedding(ref_img)  # (1, 512)
-
-    # ── YOLO ile tüm objeleri bul ────────────────────────────────
-    yolo_results = yolo.predict(
+    # ── Tahmin ───────────────────────────────────────────────────
+    results = model.predict(
         frame,
-        imgsz=640,
-        conf=confidence,
-        max_det=300,
+        imgsz=IMG_SIZE,
+        conf=max(0.1, min(0.95, confidence)),
+        max_det=MAX_DET,
         device=DEVICE,
         verbose=False,
     )
 
+    # ── Sonuçları formatla ────────────────────────────────────────
     detections = []
-    for r in yolo_results:
+    for r in results:
         if r.boxes is None:
             continue
         for box in r.boxes:
             x1, y1, x2, y2 = [int(v) for v in box.xyxy[0].tolist()]
-            bw, bh = x2 - x1, y2 - y1
-            if bw < 8 or bh < 8:
+            bw = x2 - x1
+            bh = y2 - y1
+            if bw < 5 or bh < 5:
                 continue
-
-            # Crop et
-            crop = pil_frame.crop((x1, y1, x2, y2))
-            crop_emb = get_embedding(crop)
-
-            # Referansa benzerlik
-            sim = (crop_emb @ ref_emb.T).item()
-
-            if sim >= similarity:
-                detections.append({
-                    "bbox":       [x1, y1, bw, bh],
-                    "similarity": round(sim, 3),
-                    "confidence": round(float(box.conf[0]), 3),
-                })
-
-    # Benzerliğe göre sırala
-    detections.sort(key=lambda x: x["similarity"], reverse=True)
+            detections.append({
+                "label":      model.names[int(box.cls[0])],
+                "confidence": round(float(box.conf[0]), 3),
+                "bbox":       [x1, y1, bw, bh],
+            })
 
     elapsed = int((time.time() - t0) * 1000)
 
@@ -141,4 +133,10 @@ async def detect(
 
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, workers=1, timeout_keep_alive=30)
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=8000,
+        workers=1,
+        timeout_keep_alive=30,
+    )

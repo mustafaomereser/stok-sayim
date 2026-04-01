@@ -9,10 +9,8 @@ error()   { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
 
 [ "$EUID" -ne 0 ] && error "sudo ile çalıştırın: sudo bash setup.sh"
 
-# ── Konfig ───────────────────────────────────────────────────────
 read -p "Domain (örn: stoksay.aracservistakip.com): " DOMAIN
 read -p "SSL e-posta: " EMAIL
-# ─────────────────────────────────────────────────────────────────
 
 REPO="https://github.com/mustafaomereser/stok-sayim"
 APP_DIR="/home/ubuntu/stok-sayim"
@@ -50,7 +48,7 @@ python3 -m venv "$APP_DIR/venv"
 "$APP_DIR/venv/bin/pip" install -r "$APP_DIR/server/requirements.txt" -q
 success "Python paketleri kuruldu"
 
-info "Frontend dosyaları kopyalanıyor..."
+info "Frontend kopyalanıyor..."
 mkdir -p "$WEB_DIR"
 cp "$APP_DIR/index.html" "$WEB_DIR/index.html"
 success "Frontend hazır"
@@ -58,7 +56,7 @@ success "Frontend hazır"
 info "Systemd servisi kuruluyor..."
 cat > /etc/systemd/system/stoksay.service << EOF
 [Unit]
-Description=StokSay YOLOv8 API
+Description=StokSay API
 After=network.target
 
 [Service]
@@ -79,22 +77,21 @@ systemctl enable stoksay
 systemctl restart stoksay
 success "Systemd servisi aktif"
 
-info "Nginx HTTP yapılandırılıyor..."
+info "Nginx ayarlanıyor..."
 cat > /etc/nginx/sites-available/stoksay << EOF
 server {
     listen 80;
     server_name $DOMAIN;
     client_max_body_size 10M;
 
-    # Frontend
     root $WEB_DIR;
     index index.html;
+
     location / {
         try_files \$uri \$uri/ =404;
     }
 
-    # API — tüm endpoint'leri proxy'le
-    location ~ ^/(detect|health|references) {
+    location ~ ^/(detect|health) {
         proxy_pass         http://127.0.0.1:8000;
         proxy_set_header   Host \$host;
         proxy_set_header   X-Real-IP \$remote_addr;
@@ -120,7 +117,7 @@ HEALTH=$(curl -s http://127.0.0.1:8000/health)
 if echo "$HEALTH" | grep -q "ok"; then
   success "API çalışıyor"
 else
-  warn "API henüz hazır değil, kontrol et: sudo journalctl -u stoksay -n 30"
+  warn "API henüz hazır değil: sudo journalctl -u stoksay -n 30"
 fi
 
 echo ""
@@ -129,7 +126,10 @@ echo -e "${GREEN}  Kurulum tamamlandı!${NC}"
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 echo "  Frontend : https://$DOMAIN"
-echo "  API      : https://$DOMAIN/detect"
 echo "  Health   : https://$DOMAIN/health"
 echo "  Loglar   : sudo journalctl -u stoksay -f"
+echo ""
+echo "  Model yüklemek için:"
+echo "  scp best.pt ubuntu@EC2_IP:$APP_DIR/server/"
+echo "  sudo systemctl restart stoksay"
 echo ""
