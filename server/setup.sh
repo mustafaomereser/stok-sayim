@@ -48,7 +48,6 @@ info "Python venv ve paketler kuruluyor..."
 python3 -m venv "$APP_DIR/venv"
 "$APP_DIR/venv/bin/pip" install --upgrade pip -q
 "$APP_DIR/venv/bin/pip" install -r "$APP_DIR/server/requirements.txt" -q
-"$APP_DIR/venv/bin/pip" "install ftfy regex tqdm git+https://github.com/openai/CLIP.git" -q
 success "Python paketleri kuruldu"
 
 info "Frontend dosyaları kopyalanıyor..."

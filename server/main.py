@@ -1,23 +1,26 @@
+"""
+StokSay Backend — YOLOv8 CPU Count Mode (CSRNet removed)
+t3.small için optimize edilmiştir.
+"""
+
 from fastapi import FastAPI, File, UploadFile, Form
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import numpy as np
 import cv2
 import time
-from PIL import Image
-import torch
-import clip
-import os
+from ultralytics import YOLO
 
-# ── CONFIG ───────────────────────────────────────────────────────
+# ── CONFIG ────────────────────────────────────────────────────────
+MODEL_PATH = "models/yolov8m.pt"  # absolute path
+IMG_SIZE = 640
+MAX_DET = 500
 DEVICE = "cpu"
+STRIDE = 320  # patch stride
 PATCH_SIZE = 640
-STRIDE = 320
-SIMILARITY_THRESH = 0.75
-MAX_REFERENCES = 5
 
 # ── FastAPI ───────────────────────────────────────────────────────
-app = FastAPI(title="StokSay Multi-Reference Count", version="1.0.0")
+app = FastAPI(title="StokSay API - YOLO Count Mode", version="2.0.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -25,51 +28,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── CLIP MODEL ────────────────────────────────────────────────────
-print("CLIP model yükleniyor...")
-clip_model, preprocess = clip.load("ViT-B/32", device=DEVICE)
-clip_model.eval()
-print("CLIP hazır!")
+# ── MODEL YÜKLEME ────────────────────────────────────────────────
+print(f"YOLO model yükleniyor: {MODEL_PATH}")
+yolo_model = YOLO(MODEL_PATH)
+yolo_model.to(DEVICE)
+dummy = np.zeros((IMG_SIZE, IMG_SIZE, 3), dtype=np.uint8)
+yolo_model.predict(dummy, imgsz=IMG_SIZE, verbose=False)
+print("YOLO hazır!")
 
-# ── Referans embeddingleri ─────────────────────────────────────────
-reference_embeddings = []
-reference_labels = []
-
-
-@app.post("/references")
-async def upload_references(files: list[UploadFile] = File(...)):
-    global reference_embeddings, reference_labels
-    reference_embeddings = []
-    reference_labels = []
-
-    if len(files) > MAX_REFERENCES:
-        return {"error": f"En fazla {MAX_REFERENCES} referans yükleyebilirsin."}
-
-    for f in files:
-        raw = await f.read()
-        img = Image.open(io.BytesIO(raw)).convert("RGB")
-        img_input = preprocess(img).unsqueeze(0)  # batch 1
-        with torch.no_grad():
-            emb = clip_model.encode_image(img_input.to(DEVICE))
-            emb /= emb.norm(dim=-1, keepdim=True)  # normalize
-        reference_embeddings.append(emb)
-        reference_labels.append(f.filename)
-
-    return {"status": "ok", "uploaded": [f.filename for f in files]}
-
-# ── YARDIMCI FONKSİYON ─────────────────────────────────────────────
-
-
-def cosine_similarity(a, b):
-    return (a @ b.T).item()
-
-
-def filter_overlaps(detections, iou_thresh=0.3):
-    filtered = []
-    for det in detections:
-        if all(iou(det["bbox"], f["bbox"]) < iou_thresh for f in filtered):
-            filtered.append(det)
-    return filtered
+# ── Yardımcı Fonksiyonlar ─────────────────────────────────────────
 
 
 def iou(box1, box2):
@@ -83,56 +50,96 @@ def iou(box1, box2):
     union = area1 + area2 - inter
     return inter/union if union > 0 else 0
 
-# ── DETECT ───────────────────────────────────────────────────────
+
+def filter_overlaps(detections, iou_thresh=0.3):
+    filtered = []
+    for det in detections:
+        if all(iou(det["bbox"], f["bbox"]) < iou_thresh for f in filtered):
+            filtered.append(det)
+    return filtered
+
+# ── HEALTH ───────────────────────────────────────────────────────
+
+
+@app.get("/health")
+def health():
+    return {
+        "status": "ok",
+        "yolo_classes": yolo_model.names,
+        "device": DEVICE,
+    }
+
+# ── DETECT (YOLO Count Mode) ──────────────────────────────────────
 
 
 @app.post("/detect")
-async def detect(image: UploadFile = File(...)):
-    if not reference_embeddings:
-        return {"error": "Önce referans fotoğrafları yüklemelisin."}
-
+async def detect(image: UploadFile = File(...), confidence: float = Form(default=0.4)):
     t0 = time.time()
     raw = await image.read()
     img_array = np.frombuffer(raw, dtype=np.uint8)
     frame = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
     if frame is None:
-        return {"detections": [], "count": 0, "elapsed_ms": 0, "error": "Görsel okunamadı"}
+        return {"detections": [], "elapsed_ms": 0, "count": 0, "error": "Görsel okunamadı"}
 
     h, w = frame.shape[:2]
     all_detections = []
 
-    # ── PATCH TARAMA ───────────────────────────────────────────────
+    # ── Patch processing ──────────────────────────────
     for y0 in range(0, h, STRIDE):
         for x0 in range(0, w, STRIDE):
             y1 = min(y0+PATCH_SIZE, h)
             x1 = min(x0+PATCH_SIZE, w)
             patch = frame[y0:y1, x0:x1]
-            img_patch = Image.fromarray(cv2.cvtColor(patch, cv2.COLOR_BGR2RGB))
-            img_input = preprocess(img_patch).unsqueeze(0)
 
-            with torch.no_grad():
-                patch_emb = clip_model.encode_image(img_input.to(DEVICE))
-                patch_emb /= patch_emb.norm(dim=-1, keepdim=True)
-
-            # ── REFERANS KARŞILAŞTIRMA ─────────────────────────
-            for ref_emb, label in zip(reference_embeddings, reference_labels):
-                sim = cosine_similarity(patch_emb, ref_emb)
-                if sim >= SIMILARITY_THRESH:
+            # YOLO tahmini
+            results = yolo_model.predict(
+                patch,
+                imgsz=IMG_SIZE,
+                conf=confidence,
+                iou=0.3,
+                max_det=MAX_DET,
+                device=DEVICE,
+                verbose=False
+            )
+            for r in results:
+                boxes = r.boxes
+                if boxes is None:
+                    continue
+                for box in boxes:
+                    cls_id = int(box.cls[0])
+                    label = yolo_model.names[cls_id]
+                    conf_score = float(box.conf[0])
+                    x1_box, y1_box, x2_box, y2_box = box.xyxy[0].tolist()
+                    global_box = [
+                        round(x1_box + x0),
+                        round(y1_box + y0),
+                        round(x2_box - x1_box),
+                        round(y2_box - y1_box)
+                    ]
                     all_detections.append({
                         "label": label,
-                        "confidence": round(sim, 3),
-                        "bbox": [x0, y0, x1-x0, y1-y0]
+                        "confidence": round(conf_score, 3),
+                        "bbox": global_box
                     })
 
+    # ── Çakışan kutuları filtrele
     filtered_detections = filter_overlaps(all_detections, iou_thresh=0.3)
+
     elapsed = int((time.time() - t0) * 1000)
+    total_count = len(filtered_detections)
 
     return {
         "detections": filtered_detections,
-        "count": len(filtered_detections),
+        "count": total_count,
         "elapsed_ms": elapsed
     }
 
 # ── RUN ──────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, workers=1)
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=8000,
+        workers=1,
+        timeout_keep_alive=30
+    )
