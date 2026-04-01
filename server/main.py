@@ -1,10 +1,9 @@
 """
-StokSay Backend — YOLO (detection) + CLIP (classification)
-Eğitim yok, referans fotoğraflardan öğrenir.
-t3.small (2GB RAM, 2 vCPU) için optimize edilmiştir.
+StokSay Backend — YOLO + CLIP + DBSCAN
+Eğitim yok, referans yok, label yok.
+Benzer objeleri otomatik gruplandırır ve sayar.
 """
 
-from ultralytics import YOLO
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
@@ -15,20 +14,19 @@ import numpy as np
 import cv2
 import time
 import io
+from sklearn.cluster import DBSCAN
+from sklearn.preprocessing import normalize as sk_normalize
 
 # PyTorch 2.6 fix
 _orig_load = torch.load
-
-
 def _patched_load(*args, **kwargs):
     kwargs.setdefault("weights_only", False)
     return _orig_load(*args, **kwargs)
-
-
 torch.load = _patched_load
 
+from ultralytics import YOLO
 
-app = FastAPI(title="StokSay API", version="2.0.0")
+app = FastAPI(title="StokSay API", version="3.0.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -38,118 +36,41 @@ app.add_middleware(
 
 DEVICE = "cpu"
 
-# ── MODEL YÜKLEMESİ ──────────────────────────────────────────────
 print("YOLO yükleniyor...")
-yolo = YOLO("models/yolov8n.pt")
+yolo = YOLO("yolov8n.pt")
 
 print("CLIP yükleniyor...")
 clip_model, clip_preprocess = clip.load("ViT-B/32", device=DEVICE)
 clip_model.eval()
 print("Modeller hazır!")
 
-# ── REFERANS STORE ────────────────────────────────────────────────
-# { "somun": [emb1, emb2, ...], "röle": [...] }
-reference_store: dict[str, list[torch.Tensor]] = {}
 
-
-def normalize(t: torch.Tensor) -> torch.Tensor:
-    return t / t.norm(dim=-1, keepdim=True)
-
-
-def get_clip_embedding(img: Image.Image) -> torch.Tensor:
+def get_clip_embedding(img: Image.Image) -> np.ndarray:
     tensor = clip_preprocess(img).unsqueeze(0).to(DEVICE)
     with torch.no_grad():
         emb = clip_model.encode_image(tensor)
-    return normalize(emb)
-
-
-def get_mean_embedding(label: str) -> torch.Tensor:
-    embs = reference_store[label]
-    stacked = torch.cat(embs, dim=0)
-    return normalize(stacked.mean(dim=0, keepdim=True))
-
-# ── HEALTH ───────────────────────────────────────────────────────
+    emb = emb.cpu().numpy().astype(np.float32)
+    return sk_normalize(emb)[0]  # (512,)
 
 
 @app.get("/health")
 def health():
-    return {
-        "status": "ok",
-        "references": {k: len(v) for k, v in reference_store.items()},
-        "device": DEVICE,
-    }
-
-# ── REFERANS YÜKLEMESİ ───────────────────────────────────────────
-@app.post("/references")
-async def upload_references(
-    files: list[UploadFile] = File(...),
-    label: str = Form(...),
-):
-    embeddings = []
-    for f in files:
-        contents = await f.read()
-        if not contents:
-            continue
-        try:
-            img = Image.open(io.BytesIO(contents)).convert("RGB")
-            emb = get_clip_embedding(img)
-            embeddings.append(emb)
-        except Exception as e:
-            print(f"Dosya atlandı ({f.filename}): {e}")
-            continue
-
-    if not embeddings:
-        raise HTTPException(400, "Hiçbir görsel okunamadı")
-
-    reference_store[label] = embeddings
-    return {
-        "status": "ok",
-        "label": label,
-        "photo_count": len(embeddings),
-        "all_labels": list(reference_store.keys()),
-    }
-
-
-@app.get("/references")
-def list_references():
-    return {"references": {k: len(v) for k, v in reference_store.items()}}
-
-
-@app.delete("/references/{label}")
-def delete_reference(label: str):
-    if label not in reference_store:
-        raise HTTPException(404, "Referans bulunamadı")
-    del reference_store[label]
-    return {"status": "ok", "remaining": list(reference_store.keys())}
-
-# ── DETECT ───────────────────────────────────────────────────────
+    return {"status": "ok", "device": DEVICE}
 
 
 @app.post("/detect")
 async def detect(
     image: UploadFile = File(...),
-    confidence: float = Form(default=0.3),  # YOLO eşiği
-    similarity: float = Form(default=0.6),  # CLIP benzerlik eşiği
+    confidence: float = Form(default=0.2),   # YOLO eşiği — düşük tut, çok obje yakalasın
+    eps: float = Form(default=0.3),           # DBSCAN: ne kadar benzer olunca aynı grup (0-1, küçük = daha katı)
+    min_samples: int = Form(default=1),       # DBSCAN: grup için min obje sayısı
 ):
     """
-    1. YOLO → tüm objeleri bul (bbox)
-    2. Her bbox'ı crop et
-    3. CLIP → referans fotoğraflarına benzerliğe göre sınıflandır
-    4. Eşleşenleri say ve döndür
-
-    Response:
-    {
-        "detections": [
-            { "label": "somun", "confidence": 0.87, "similarity": 0.72, "bbox": [x, y, w, h] }
-        ],
-        "elapsed_ms": 430,
-        "count": 5
-    }
+    1. YOLO → tüm objeleri bul
+    2. Her bbox'ı CLIP ile embedding'e çevir
+    3. DBSCAN ile benzer embedding'leri grupla
+    4. Her grup = ayrı obje türü → say
     """
-    if not reference_store:
-        raise HTTPException(
-            400, "Önce /references ile referans fotoğraf yükle")
-
     t0 = time.time()
 
     raw = await image.read()
@@ -166,47 +87,71 @@ async def detect(
 
     pil_full = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
 
-    # Referans embeddingler
-    label_embeddings = {l: get_mean_embedding(l) for l in reference_store}
-
-    # YOLO detection
+    # ── ADIM 1: YOLO detection ───────────────────────────────────
     yolo_results = yolo.predict(
-        frame, imgsz=640, conf=confidence, max_det=200, device=DEVICE, verbose=False)
+        frame,
+        imgsz=640,
+        conf=confidence,
+        max_det=300,
+        device=DEVICE,
+        verbose=False,
+    )
 
-    detections = []
+    boxes = []
     for r in yolo_results:
         if r.boxes is None:
             continue
         for box in r.boxes:
             x1, y1, x2, y2 = [int(v) for v in box.xyxy[0].tolist()]
             bw, bh = x2 - x1, y2 - y1
-            if bw < 10 or bh < 10:
+            if bw < 8 or bh < 8:
                 continue
-
-            crop = pil_full.crop((x1, y1, x2, y2))
-            crop_emb = get_clip_embedding(crop)
-
-            # En benzer label'ı bul
-            best_label, best_sim = None, -1.0
-            for label, ref_emb in label_embeddings.items():
-                sim = (crop_emb @ ref_emb.T).item()
-                if sim > best_sim:
-                    best_sim, best_label = sim, label
-
-            if best_sim < similarity:
-                continue
-
-            detections.append({
-                "label":      best_label,
+            boxes.append({
+                "bbox": [x1, y1, bw, bh],
                 "confidence": round(float(box.conf[0]), 3),
-                "similarity": round(best_sim, 3),
-                "bbox":       [x1, y1, bw, bh],
             })
 
+    if not boxes:
+        return {"detections": [], "elapsed_ms": int((time.time()-t0)*1000), "count": 0}
+
+    # ── ADIM 2: CLIP embedding ───────────────────────────────────
+    embeddings = []
+    for b in boxes:
+        x1, y1, bw, bh = b["bbox"]
+        crop = pil_full.crop((x1, y1, x1+bw, y1+bh))
+        emb = get_clip_embedding(crop)
+        embeddings.append(emb)
+
+    embeddings_np = np.array(embeddings)  # (N, 512)
+
+    # ── ADIM 3: DBSCAN clustering ────────────────────────────────
+    # metric=cosine: embedding benzerliği cosine distance ile ölçülür
+    db = DBSCAN(eps=eps, min_samples=min_samples, metric="cosine", n_jobs=-1)
+    labels = db.fit_predict(embeddings_np)
+    # -1 = gürültü (hiçbir gruba uymayan)
+
+    # ── ADIM 4: Sonuçları formatla ───────────────────────────────
+    detections = []
+    for i, (box, label) in enumerate(zip(boxes, labels)):
+        detections.append({
+            "group":      int(label),       # -1 = bilinmiyor
+            "confidence": box["confidence"],
+            "bbox":       box["bbox"],
+        })
+
     elapsed = int((time.time() - t0) * 1000)
-    return {"detections": detections, "elapsed_ms": elapsed, "count": len(detections)}
+
+    # Grup istatistikleri
+    unique_groups = set(l for l in labels if l >= 0)
+    group_counts  = {int(g): int(np.sum(labels == g)) for g in unique_groups}
+
+    return {
+        "detections":   detections,
+        "group_counts": group_counts,   # { 0: 5, 1: 3, 2: 8 }
+        "total":        len([l for l in labels if l >= 0]),
+        "elapsed_ms":   elapsed,
+    }
 
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000,
-                workers=1, timeout_keep_alive=30)
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, workers=1, timeout_keep_alive=30)
