@@ -23,7 +23,7 @@ from ultralytics import YOLO
 
 # ── CONFIG ────────────────────────────────────────────────────────
 CUSTOM_MODEL  = "best.pt"       # Eğitilmiş model
-FALLBACK_MODEL = "models/yolov8n.pt"   # Yoksa bununla çalış
+FALLBACK_MODEL = "models/yolov8m.pt"   # Yoksa bununla çalış
 IMG_SIZE      = 640
 MAX_DET       = 300
 DEVICE        = "cpu"
