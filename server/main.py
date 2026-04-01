@@ -80,8 +80,6 @@ def health():
     }
 
 # ── REFERANS YÜKLEMESİ ───────────────────────────────────────────
-
-
 @app.post("/references")
 async def upload_references(
     files: list[UploadFile] = File(...),
@@ -89,11 +87,19 @@ async def upload_references(
 ):
     embeddings = []
     for f in files:
-        await f.seek(0)          # ← bunu ekle
-        raw = await f.read()
-        img = Image.open(io.BytesIO(raw)).convert("RGB")
-        emb = get_clip_embedding(img)
-        embeddings.append(emb)
+        contents = await f.read()
+        if not contents:
+            continue
+        try:
+            img = Image.open(io.BytesIO(contents)).convert("RGB")
+            emb = get_clip_embedding(img)
+            embeddings.append(emb)
+        except Exception as e:
+            print(f"Dosya atlandı ({f.filename}): {e}")
+            continue
+
+    if not embeddings:
+        raise HTTPException(400, "Hiçbir görsel okunamadı")
 
     reference_store[label] = embeddings
     return {
