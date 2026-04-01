@@ -3,6 +3,7 @@ StokSay Backend — YOLOv8 + FastAPI
 best.pt varsa onu kullanır, yoksa yolov8n.pt ile çalışır.
 """
 
+from ultralytics import YOLO
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
@@ -14,19 +15,22 @@ import os
 # PyTorch 2.6 fix — ultralytics yüklemeden önce yapılmalı
 import torch
 _orig_load = torch.load
+
+
 def _patched_load(*args, **kwargs):
     kwargs.setdefault("weights_only", False)
     return _orig_load(*args, **kwargs)
+
+
 torch.load = _patched_load
 
-from ultralytics import YOLO
 
 # ── CONFIG ────────────────────────────────────────────────────────
-CUSTOM_MODEL  = "best.pt"       # Eğitilmiş model
+CUSTOM_MODEL = "best.pt"       # Eğitilmiş model
 FALLBACK_MODEL = "models/yolov8m.pt"   # Yoksa bununla çalış
-IMG_SIZE      = 640
-MAX_DET       = 300
-DEVICE        = "cpu"
+IMG_SIZE = 640
+MAX_DET = 300
+DEVICE = "cpu"
 
 # ── MODEL YÜKLEMESİ ──────────────────────────────────────────────
 model_path = CUSTOM_MODEL if os.path.exists(CUSTOM_MODEL) else FALLBACK_MODEL
@@ -49,6 +53,8 @@ app.add_middleware(
 )
 
 # ── HEALTH ───────────────────────────────────────────────────────
+
+
 @app.get("/health")
 def health():
     return {
@@ -59,10 +65,12 @@ def health():
     }
 
 # ── DETECT ───────────────────────────────────────────────────────
+
+
 @app.post("/detect")
 async def detect(
     image:      UploadFile = File(...),
-    confidence: float      = Form(default=0.4),
+    confidence: float = Form(default=0.4),
 ):
     """
     Fotoğrafı alır, YOLOv8 ile analiz eder.
@@ -101,6 +109,7 @@ async def detect(
         imgsz=IMG_SIZE,
         conf=max(0.1, min(0.95, confidence)),
         max_det=MAX_DET,
+        iou=0.45,        # ← bunu ekle, düşürdükçe duplicate azalır
         device=DEVICE,
         verbose=False,
     )
